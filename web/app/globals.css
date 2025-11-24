@@ -251,6 +251,58 @@ main {
   color: #04111f;
 }
 
+.tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.tab {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  padding: 10px 12px;
+  color: var(--text);
+  border-radius: 10px 10px 0 0;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.tab-active {
+  background: var(--card);
+  border-color: var(--accent);
+  box-shadow: 0 -4px 20px rgba(76, 195, 255, 0.08);
+}
+
+.compact-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+
+.compact-table th,
+.compact-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 8px;
+  text-align: left;
+  color: var(--text);
+}
+
+.compact-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.upload-area {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 22px;
+  text-align: center;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.02);
+}
+
 @media (max-width: 1080px) {
   .two-column {
     grid-template-columns: 1fr;
