@@ -2,9 +2,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-
-from api.app.routers import demo
+import os
 
 app = FastAPI(title="Portfolio API", version="0.1.0", docs_url="/docs")
 
@@ -17,12 +15,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(demo.router)
-
 
 @app.get("/health", tags=["health"])
 async def health() -> JSONResponse:
     return JSONResponse({"status": "ok"})
-
-
-# TODO: Agents to implement routes per REBUILD_PLAN.md (upload, series, metrics, correlations, CTA, optimizers, exports, jobs/SSE).
