@@ -21,7 +21,7 @@ Lightweight tracker for active work. Keep this in sync with actual status. Roles
 ## Status board
 | Workstream | Owner           | Branch             | Status  | Notes |
 |------------|-----------------|--------------------|---------|-------|
-| Integrator | agent-integrator | feature/integrator | Pending | Rebase/merge gatekeeper; resolves conflicts; updates plan/board. |
+| Integrator | zornpatch14      | feature/integrator | Pending | Rebase/merge gatekeeper; resolves conflicts; updates plan/board. |
 | A) Ingest  | agent-ingest    | feature/ingest     | Pending | Build Parquet ingest + metadata index. |
 | B) Compute | agent-compute   | feature/compute    | Pending | Per-file caches; portfolio aggregation; downsampling. |
 | C) API     | agent-api       | feature/api        | Pending | FastAPI v1 routes; SSE jobs; exports; OpenAPI. |
