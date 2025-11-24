@@ -32,6 +32,41 @@ export type MetricsRow = {
   exposure: number;
 };
 
+export type CorrelationResponse = {
+  labels: string[];
+  matrix: number[][];
+  mode: string;
+  notes: string[];
+};
+
+export type OptimizerResult = {
+  summary: {
+    objective: string;
+    expectedReturn: number;
+    risk: number;
+    sharpe: number;
+    maxDrawdown: number;
+    capital: number;
+  };
+  weights: { asset: string; weight: number; contracts: number; marginPerContract: number }[];
+  contracts: { asset: string; contracts: number; notional: number; margin: number }[];
+};
+
+export type CTAResponse = {
+  summary: {
+    roi: number;
+    annualRor: number;
+    timeInMarket: number;
+    longestFlat: number;
+    maxRunup: number;
+    maxDrawdown: number;
+    avgMonthly: number;
+    stdMonthly: number;
+  };
+  monthly: { month: string; additive: number; compounded: number }[];
+  annual: { year: number; additive: number; compounded: number }[];
+};
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
 
 export type SeriesKind =
@@ -52,6 +87,9 @@ const endpoint: Record<SeriesKind | 'metrics' | 'histogram', string> = {
   histogram: '/api/v1/series/histogram',
   metrics: '/api/v1/metrics',
 };
+const correlationEndpoint = '/api/v1/correlations';
+const ctaEndpoint = '/api/v1/cta';
+const optimizerEndpoint = '/api/v1/optimizer/allocator';
 
 async function fetchJson<T>(path: string, fallback: T): Promise<T> {
   if (!API_BASE) return fallback;
@@ -159,6 +197,84 @@ export function mockMetrics(selection: Selection): MetricsRow[] {
   });
 }
 
+export function mockCorrelations(selection: Selection, mode: string = 'drawdown_pct'): CorrelationResponse {
+  const labels = selection.files.length ? selection.files : ['Portfolio'];
+  const rand = seeded(`${selection.name}-corr`);
+  const size = labels.length || 2;
+  const matrix: number[][] = Array.from({ length: size }, (_, row) =>
+    Array.from({ length: size }, (_, col) => {
+      if (row === col) return 1;
+      const base = rand() * 0.7;
+      return parseFloat(((rand() > 0.5 ? base : -base)).toFixed(3));
+    }),
+  );
+  return {
+    labels,
+    matrix,
+    mode,
+    notes: [
+      'Mirrors legacy correlation heatmap (drawdown %, returns, P/L, slope modes).',
+      'Mocked values fall between -0.7 and 0.7 to show diversification effects.',
+    ],
+  };
+}
+
+export function mockOptimizer(selection: Selection): OptimizerResult {
+  const rand = seeded(`${selection.name}-optimizer`);
+  const files = selection.files.length ? selection.files : ['Portfolio'];
+  const weights = files.map((file) => {
+    const weight = parseFloat((0.2 + rand() * 0.5).toFixed(2));
+    const contracts = Math.max(1, Math.round(rand() * 3));
+    const marginPerContract = 3000 + Math.round(rand() * 4000);
+    return { asset: file, weight, contracts, marginPerContract };
+  });
+  return {
+    summary: {
+      objective: 'Max Risk-Adjusted Return',
+      expectedReturn: parseFloat((8 + rand() * 6).toFixed(2)),
+      risk: parseFloat((4 + rand() * 3).toFixed(2)),
+      sharpe: parseFloat((1 + rand()).toFixed(2)),
+      maxDrawdown: parseFloat((-6 - rand() * 8).toFixed(2)),
+      capital: 50000,
+    },
+    weights,
+    contracts: weights.map((row) => ({
+      asset: row.asset,
+      contracts: row.contracts,
+      notional: parseFloat((row.contracts * 18000 + rand() * 5000).toFixed(2)),
+      margin: parseFloat((row.contracts * row.marginPerContract).toFixed(2)),
+    })),
+  };
+}
+
+export function mockCta(selection: Selection): CTAResponse {
+  const rand = seeded(`${selection.name}-cta`);
+  const months: CTAResponse['monthly'] = [];
+  for (let i = 1; i <= 12; i += 1) {
+    const additive = parseFloat(((rand() - 0.45) * 10).toFixed(2));
+    const compounded = parseFloat((additive - 0.4 + rand()).toFixed(2));
+    months.push({ month: `2024-${String(i).padStart(2, '0')}`, additive, compounded });
+  }
+  const annual: CTAResponse['annual'] = [
+    { year: 2023, additive: 12.1, compounded: 10.4 },
+    { year: 2024, additive: 16.4, compounded: 15.1 },
+  ];
+  return {
+    summary: {
+      roi: 34.2,
+      annualRor: 16.4,
+      timeInMarket: 62.5,
+      longestFlat: 42,
+      maxRunup: 18.7,
+      maxDrawdown: -12.6,
+      avgMonthly: 1.8,
+      stdMonthly: 3.1,
+    },
+    monthly: months,
+    annual,
+  };
+}
+
 export async function fetchSeries(selection: Selection, kind: SeriesKind) {
   const query = selectionQuery(selection);
   const fallback = mockSeries(selection, kind);
@@ -178,4 +294,25 @@ export async function fetchHistogram(selection: Selection) {
   const fallback = mockHistogram(selection);
   const path = `${endpoint.histogram}?${query}`;
   return fetchJson<HistogramResponse>(path, fallback);
+}
+
+export async function fetchCorrelations(selection: Selection, mode: string = 'drawdown_pct') {
+  const query = `${selectionQuery(selection)}&mode=${mode}`;
+  const fallback = mockCorrelations(selection, mode);
+  const path = `${correlationEndpoint}?${query}`;
+  return fetchJson<CorrelationResponse>(path, fallback);
+}
+
+export async function fetchOptimizer(selection: Selection) {
+  const query = selectionQuery(selection);
+  const fallback = mockOptimizer(selection);
+  const path = `${optimizerEndpoint}?${query}`;
+  return fetchJson<OptimizerResult>(path, fallback);
+}
+
+export async function fetchCta(selection: Selection) {
+  const query = selectionQuery(selection);
+  const fallback = mockCta(selection);
+  const path = `${ctaEndpoint}?${query}`;
+  return fetchJson<CTAResponse>(path, fallback);
 }
