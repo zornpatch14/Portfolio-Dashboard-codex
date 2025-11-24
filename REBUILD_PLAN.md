@@ -10,6 +10,7 @@ Authoritative plan for the multi-agent refactor from Dash to the API-first Next.
 - Async for heavy work (optimizers, correlations) with SSE progress.
 - Parity with current app outputs on a baseline selection matrix.
 - CI-enforced quality (lint/type/tests/contracts/perf smoke).
+- Legacy code note: keep existing Dash/`Portfolio_Dashboard7.py`/`src/` files as reference only. Do not delete or modify them unless explicitly needed for reference. All new implementation lives in `api/`, `web/`, `cli/`, `tests/`. Removal of legacy code happens later, after the new stack is validated.
 
 ## Stack (baseline)
 - Front end: Next.js + React + TypeScript; ECharts; AG Grid; React Query; Tailwind.
@@ -100,4 +101,3 @@ Authoritative plan for the multi-agent refactor from Dash to the API-first Next.
 - CI must pass (lint/type/unit/contract/parity/perf smoke/E2E where applicable) before merge.
 - Breaking contract changes require updating OpenAPI, schemas, and parity expectations.
 - Integrator reviews cross-cutting changes and resolves conflicts.
-

@@ -36,6 +36,7 @@ docker-compose up --build
 - Short-lived feature branches (`feature/<area>`). No direct-to-main.
 - Auto-merge when CI green; Integrator handles rebases/conflicts.
 - Update `TASK_BOARD.md` and `REBUILD_PLAN.md` when changing contracts/ownership.
+- Legacy code: keep existing Dash/legacy files (`Portfolio_Dashboard7.py`, `src/`) as reference only. Build the new stack under `api/`, `web/`, `cli/`, `tests/`. Do not delete legacy files until the new stack is validated.
 
 ## Branch protection (recommend)
 - Protect `main`: require PR + CI green before merge; enable auto-merge on green.
