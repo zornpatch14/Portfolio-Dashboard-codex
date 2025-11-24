@@ -22,6 +22,11 @@ condaenv*/
 .DS_Store
 Thumbs.db
 
+# --- Node/JS artifacts ---
+node_modules/
+web/.next/
+web/node_modules/
+
 # --- Secrets (if you use them) ---
 .env
 .env.*
