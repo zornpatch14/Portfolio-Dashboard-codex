@@ -60,6 +60,17 @@ class SeriesResponse(BaseModel):
     data: List[SeriesPoint]
 
 
+class HistogramBucket(BaseModel):
+    bucket: str
+    count: int
+
+
+class HistogramResponse(BaseModel):
+    label: str
+    selection: Selection
+    buckets: List[HistogramBucket]
+
+
 class MetricsRow(BaseModel):
     file_id: str
     metric: str
