@@ -1,0 +1,60 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    command: uvicorn api.app.main:app --host 0.0.0.0 --port 8000 --reload
+    env_file:
+      - .env
+    volumes:
+      - ./api:/app
+      - ./tests/data:/data/tests/data
+      - ./tests/baseline:/data/tests/baseline
+      - ./storage:/data/storage
+    depends_on:
+      - redis
+    ports:
+      - "8000:8000"
+
+  worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    command: bash -c "echo 'worker placeholder; wire Celery/RQ later' && sleep infinity"
+    env_file:
+      - .env
+    volumes:
+      - ./api:/app
+      - ./storage:/data/storage
+    depends_on:
+      - redis
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    command: npm run dev -- --hostname 0.0.0.0 --port 3000
+    env_file:
+      - .env
+    volumes:
+      - ./web:/app
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
+networks:
+  default:
+    driver: bridge
