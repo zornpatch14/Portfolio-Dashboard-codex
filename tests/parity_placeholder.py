@@ -1,32 +1,47 @@
-"""
-Smoke placeholder.
+"""Parity smoke tests for selections defined in tests/baseline/selections.json."""
 
-Intended future flow:
-- Load baseline selections from tests/baseline/selections.json.
-- Call new API endpoints for each selection and compare to goldens (when available).
-
-Current lightweight check:
-- Ensure selections file parses and referenced files exist under tests/data/.
-"""
+from __future__ import annotations
 
 import json
-from pathlib import Path
+
+import pytest
+
+from tests.parity_harness import compute_selection_summary, load_goldens, load_selections
 
 
-def test_selections_files_exist():
-    root = Path(__file__).resolve().parents[1]
-    sel_path = root / "baseline" / "selections.json"
-    data_dir = root / "data"
+GOLDENS = load_goldens()
+SELECTIONS = load_selections()
 
-    with sel_path.open("r", encoding="utf-8") as f:
-        selections = json.load(f)
 
-    assert isinstance(selections, list) and selections, "selections.json must be a non-empty list"
+def _assert_float_close(actual: float, expected: float, rel: float = 1e-6):
+    assert pytest.approx(expected, rel=rel) == actual
 
-    missing = []
-    for sel in selections:
-        for fname in sel.get("files", []):
-            if not (data_dir / fname).exists():
-                missing.append(fname)
 
-    assert not missing, f"Missing files in tests/data: {missing}"
+def _assert_summary_matches(actual: dict, expected: dict):
+    assert set(actual["files"].keys()) == set(expected["files"].keys())
+    for fname, metrics in expected["files"].items():
+        got = actual["files"][fname]
+        assert got["trades"] == metrics["trades"]
+        _assert_float_close(got["net_profit"], metrics["net_profit"])
+        _assert_float_close(got["max_dd"], metrics["max_dd"])
+
+    for key in ("trades", "net_profit", "max_dd", "equity_end"):
+        if key == "trades":
+            assert actual["portfolio"][key] == expected["portfolio"][key]
+        else:
+            _assert_float_close(actual["portfolio"][key], expected["portfolio"][key])
+
+
+@pytest.mark.parametrize("selection", SELECTIONS, ids=lambda s: s["name"])
+def test_parity_against_baseline(selection):
+    name = selection["name"]
+    assert name in GOLDENS, f"Missing golden for selection {name}"
+    summary = compute_selection_summary(selection)
+    _assert_summary_matches(summary, GOLDENS[name])
+
+
+@pytest.mark.parametrize("selection", SELECTIONS, ids=lambda s: s["name"])
+def test_selection_schema_roundtrip(selection):
+    # Ensure selections remain JSON-serializable and stable across runs
+    as_json = json.loads(json.dumps(selection))
+    assert as_json == selection

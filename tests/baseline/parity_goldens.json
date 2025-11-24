@@ -1,0 +1,142 @@
+{
+  "mnq15_single": {
+    "files": {
+      "tradeslist_MNQ_15_5Xnew.xlsx": {
+        "trades": 427,
+        "net_profit": 28567.599999999995,
+        "max_dd": -3927.9
+      }
+    },
+    "portfolio": {
+      "trades": 427,
+      "net_profit": 28567.599999999995,
+      "max_dd": -3927.9,
+      "equity_end": 28567.6
+    }
+  },
+  "mes15_single": {
+    "files": {
+      "tradeslist_MES_15_4Xnew.xlsx": {
+        "trades": 421,
+        "net_profit": 7995.550000000002,
+        "max_dd": -3504.85
+      }
+    },
+    "portfolio": {
+      "trades": 421,
+      "net_profit": 7995.550000000002,
+      "max_dd": -3504.85,
+      "equity_end": 7995.55
+    }
+  },
+  "mnq60_single": {
+    "files": {
+      "tradeslist_MNQ_60_17Xnew.xlsx": {
+        "trades": 303,
+        "net_profit": 12624.9,
+        "max_dd": -2651.0
+      }
+    },
+    "portfolio": {
+      "trades": 303,
+      "net_profit": 12624.9,
+      "max_dd": -2651.0,
+      "equity_end": 12624.9
+    }
+  },
+  "ng60_single": {
+    "files": {
+      "tradeslist_NG_60_91Xnew.xlsx": {
+        "trades": 292,
+        "net_profit": 65172.0,
+        "max_dd": -16928.0
+      }
+    },
+    "portfolio": {
+      "trades": 292,
+      "net_profit": 65172.0,
+      "max_dd": -16928.0,
+      "equity_end": 65172.0
+    }
+  },
+  "cd_jy_combo": {
+    "files": {
+      "tradeslist_CD_30_4Xnew.xlsx": {
+        "trades": 608,
+        "net_profit": 18737.0,
+        "max_dd": -10895.0
+      },
+      "tradeslist_JY_30_92Xnew.xlsx": {
+        "trades": 581,
+        "net_profit": 4030.0,
+        "max_dd": -18626.75
+      }
+    },
+    "portfolio": {
+      "trades": 1189,
+      "net_profit": 22767.0,
+      "max_dd": -14450.5,
+      "equity_end": 22767.0
+    }
+  },
+  "mnq_mes_pair": {
+    "files": {
+      "tradeslist_MNQ_15_5Xnew.xlsx": {
+        "trades": 427,
+        "net_profit": 28567.599999999995,
+        "max_dd": -3927.9
+      },
+      "tradeslist_MES_15_4Xnew.xlsx": {
+        "trades": 421,
+        "net_profit": 7995.550000000002,
+        "max_dd": -3504.85
+      }
+    },
+    "portfolio": {
+      "trades": 848,
+      "net_profit": 36563.149999999994,
+      "max_dd": -7043.449999999999,
+      "equity_end": 36563.15
+    }
+  },
+  "all_files_combo": {
+    "files": {
+      "tradeslist_CD_30_4Xnew.xlsx": {
+        "trades": 608,
+        "net_profit": 18737.0,
+        "max_dd": -10895.0
+      },
+      "tradeslist_JY_30_92Xnew.xlsx": {
+        "trades": 581,
+        "net_profit": 4030.0,
+        "max_dd": -18626.75
+      },
+      "tradeslist_MES_15_4Xnew.xlsx": {
+        "trades": 421,
+        "net_profit": 7995.550000000002,
+        "max_dd": -3504.85
+      },
+      "tradeslist_MNQ_15_5Xnew.xlsx": {
+        "trades": 427,
+        "net_profit": 28567.599999999995,
+        "max_dd": -3927.9
+      },
+      "tradeslist_MNQ_60_17Xnew.xlsx": {
+        "trades": 303,
+        "net_profit": 12624.9,
+        "max_dd": -2651.0
+      },
+      "tradeslist_NG_60_91Xnew.xlsx": {
+        "trades": 292,
+        "net_profit": 65172.0,
+        "max_dd": -16928.0
+      }
+    },
+    "portfolio": {
+      "trades": 2632,
+      "net_profit": 137127.05000000002,
+      "max_dd": -14242.849999999999,
+      "equity_end": 137127.05
+    }
+  }
+}
