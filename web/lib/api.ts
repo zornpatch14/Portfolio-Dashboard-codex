@@ -12,6 +12,16 @@ export type SeriesResponse = {
   downsampledCount?: number;
 };
 
+export type HistogramBucket = {
+  bucket: string;
+  count: number;
+};
+
+export type HistogramResponse = {
+  label: string;
+  buckets: HistogramBucket[];
+};
+
 export type MetricsRow = {
   scope: string;
   netProfit: number;
@@ -24,9 +34,22 @@ export type MetricsRow = {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
 
-const endpoint = {
+export type SeriesKind =
+  | 'equity'
+  | 'drawdown'
+  | 'equityPercent'
+  | 'intradayDrawdown'
+  | 'netpos'
+  | 'margin';
+
+const endpoint: Record<SeriesKind | 'metrics' | 'histogram', string> = {
   equity: '/api/v1/series/equity',
   drawdown: '/api/v1/series/drawdown',
+  equityPercent: '/api/v1/series/equity-percent',
+  intradayDrawdown: '/api/v1/series/intraday-dd',
+  netpos: '/api/v1/series/netpos',
+  margin: '/api/v1/series/margin',
+  histogram: '/api/v1/series/histogram',
   metrics: '/api/v1/metrics',
 };
 
@@ -71,26 +94,51 @@ function selectionQuery(selection: Selection) {
   return params.toString();
 }
 
-export function mockSeries(selection: Selection, kind: 'equity' | 'drawdown'): SeriesResponse {
+export function mockSeries(selection: Selection, kind: SeriesKind): SeriesResponse {
   const rand = seeded(`${selection.name}-${kind}`);
   const points: SeriesPoint[] = [];
-  let running = kind === 'equity' ? 0 : 0;
-  const start = Date.now() - 1000 * 60 * 60 * 24 * 60;
-  for (let i = 0; i < 60; i += 1) {
-    const drift = (rand() - 0.45) * (kind === 'equity' ? 1200 : 400);
+  let running = 0;
+  const start = Date.now() - 1000 * 60 * 60 * 24 * 120;
+  const days = 90;
+  for (let i = 0; i < days; i += 1) {
+    const drift = (rand() - 0.48) * 1200;
     running += drift;
-    const base = kind === 'equity' ? 25000 : 0;
+    const base = kind === 'drawdown' || kind === 'intradayDrawdown' ? -Math.abs(running * 0.6) : 25000;
+    const value = (() => {
+      if (kind === 'drawdown' || kind === 'intradayDrawdown') return Math.min(-Math.abs(running * 0.75), -100);
+      if (kind === 'equityPercent') return 100 + running / 1000;
+      if (kind === 'netpos') return Math.round((rand() - 0.5) * 8);
+      if (kind === 'margin') return Math.max(0, 5000 + running * 0.15 + rand() * 800);
+      return base + running;
+    })();
     points.push({
       timestamp: new Date(start + i * 86400000).toISOString().slice(0, 10),
-      value: kind === 'equity' ? base + running : Math.min(-Math.abs(running), 0),
+      value,
     });
   }
+  const labelByKind: Record<SeriesKind, string> = {
+    equity: 'Equity Curve',
+    drawdown: 'Drawdown',
+    equityPercent: 'Percent Equity',
+    intradayDrawdown: 'Intraday Drawdown',
+    netpos: 'Net Position',
+    margin: 'Margin Usage',
+  };
   return {
-    label: `${kind === 'equity' ? 'Equity Curve' : 'Drawdown'} (${selection.name})`,
+    label: `${labelByKind[kind]} (${selection.name})`,
     points,
     rawCount: points.length,
     downsampledCount: points.length,
   };
+}
+
+export function mockHistogram(selection: Selection): HistogramResponse {
+  const rand = seeded(`${selection.name}-histogram`);
+  const buckets: HistogramBucket[] = [];
+  for (let i = -6; i <= 8; i += 1) {
+    buckets.push({ bucket: `${i * 10}%`, count: Math.max(1, Math.round(rand() * 120)) });
+  }
+  return { label: `Return distribution (${selection.name})`, buckets };
 }
 
 export function mockMetrics(selection: Selection): MetricsRow[] {
@@ -111,7 +159,7 @@ export function mockMetrics(selection: Selection): MetricsRow[] {
   });
 }
 
-export async function fetchSeries(selection: Selection, kind: 'equity' | 'drawdown') {
+export async function fetchSeries(selection: Selection, kind: SeriesKind) {
   const query = selectionQuery(selection);
   const fallback = mockSeries(selection, kind);
   const path = `${endpoint[kind]}?${query}`;
@@ -123,4 +171,11 @@ export async function fetchMetrics(selection: Selection) {
   const fallback = mockMetrics(selection);
   const path = `${endpoint.metrics}?${query}`;
   return fetchJson<MetricsRow[]>(path, fallback);
+}
+
+export async function fetchHistogram(selection: Selection) {
+  const query = selectionQuery(selection);
+  const fallback = mockHistogram(selection);
+  const path = `${endpoint.histogram}?${query}`;
+  return fetchJson<HistogramResponse>(path, fallback);
 }
