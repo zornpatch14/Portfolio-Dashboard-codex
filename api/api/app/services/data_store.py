@@ -104,14 +104,38 @@ class DataStore:
 
     # ---------------- helpers ----------------
     def _paths_for_selection(self, selection: Selection) -> list[Path]:
-        ids = selection.files or [m.file_id for m in self.ingest_service.index.all()]
-        metas = []
-        for fid in ids:
-            meta = self.ingest_service.index.get(fid)
-            if not meta:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"File id {fid} not found")
-            metas.append(meta)
-        return [Path(m.trades_path) for m in metas]
+        """Filter available files using selection filters and return Parquet paths."""
+
+        all_meta = self.ingest_service.index.all()
+        if selection.files:
+            # explicit ids take precedence
+            filtered = []
+            for fid in selection.files:
+                meta = self.ingest_service.index.get(fid)
+                if not meta:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"File id {fid} not found")
+                filtered.append(meta)
+        else:
+            filtered = all_meta
+
+        symbols = set(selection.symbols or [])
+        intervals = set(selection.intervals or [])
+        strategies = set(selection.strategies or [])
+
+        def keep(meta: TradeFileMetadata) -> bool:
+            if symbols and meta.symbol and meta.symbol not in symbols:
+                return False
+            if intervals and meta.interval is not None and str(meta.interval) not in intervals:
+                return False
+            if strategies and meta.strategy and meta.strategy not in strategies:
+                return False
+            return True
+
+        filtered = [m for m in filtered if keep(m)]
+        if not filtered:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No files match selection filters")
+
+        return [Path(m.trades_path) for m in filtered]
 
     def _to_points(self, rows, ts_key: str, value_key: str) -> list[SeriesPoint]:
         points: list[SeriesPoint] = []
@@ -143,6 +167,26 @@ class DataStore:
             data = self._to_points(frame.iter_rows(named=True), "timestamp", "equity")
             return SeriesResponse(
                 series="equity",
+                selection=selection,
+                downsampled=downsample,
+                raw_count=raw,
+                downsampled_count=sampled,
+                data=data,
+            )
+
+        if series_name == "equity_percent":
+            frame = view.percent_equity
+            if downsample:
+                result = downsample_timeseries(frame, "timestamp", "percent_equity", target_points=2000)
+                frame = result.downsampled
+                raw = result.raw_count
+                sampled = result.downsampled_count
+            else:
+                raw = len(frame)
+                sampled = len(frame)
+            data = self._to_points(frame.iter_rows(named=True), "timestamp", "percent_equity")
+            return SeriesResponse(
+                series="equity_percent",
                 selection=selection,
                 downsampled=downsample,
                 raw_count=raw,
