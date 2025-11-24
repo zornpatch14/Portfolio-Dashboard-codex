@@ -1,0 +1,100 @@
+[
+  {
+    "name": "mnq15_single",
+    "files": ["tradeslist_MNQ_15_5Xnew.xlsx"],
+    "symbols": [],
+    "intervals": [],
+    "strategies": [],
+    "direction": "All",
+    "start": null,
+    "end": null,
+    "contracts": {},
+    "margins": {},
+    "spike": false
+  },
+  {
+    "name": "mes15_single",
+    "files": ["tradeslist_MES_15_4Xnew.xlsx"],
+    "symbols": [],
+    "intervals": [],
+    "strategies": [],
+    "direction": "All",
+    "start": null,
+    "end": null,
+    "contracts": {},
+    "margins": {},
+    "spike": false
+  },
+  {
+    "name": "mnq60_single",
+    "files": ["tradeslist_MNQ_60_17Xnew.xlsx"],
+    "symbols": [],
+    "intervals": [],
+    "strategies": [],
+    "direction": "All",
+    "start": null,
+    "end": null,
+    "contracts": {},
+    "margins": {},
+    "spike": false
+  },
+  {
+    "name": "ng60_single",
+    "files": ["tradeslist_NG_60_91Xnew.xlsx"],
+    "symbols": [],
+    "intervals": [],
+    "strategies": [],
+    "direction": "All",
+    "start": null,
+    "end": null,
+    "contracts": {},
+    "margins": {},
+    "spike": false
+  },
+  {
+    "name": "cd_jy_combo",
+    "files": ["tradeslist_CD_30_4Xnew.xlsx", "tradeslist_JY_30_92Xnew.xlsx"],
+    "symbols": [],
+    "intervals": [],
+    "strategies": [],
+    "direction": "All",
+    "start": null,
+    "end": null,
+    "contracts": {},
+    "margins": {},
+    "spike": false
+  },
+  {
+    "name": "mnq_mes_pair",
+    "files": ["tradeslist_MNQ_15_5Xnew.xlsx", "tradeslist_MES_15_4Xnew.xlsx"],
+    "symbols": [],
+    "intervals": [],
+    "strategies": [],
+    "direction": "All",
+    "start": null,
+    "end": null,
+    "contracts": {},
+    "margins": {},
+    "spike": false
+  },
+  {
+    "name": "all_files_combo",
+    "files": [
+      "tradeslist_CD_30_4Xnew.xlsx",
+      "tradeslist_JY_30_92Xnew.xlsx",
+      "tradeslist_MES_15_4Xnew.xlsx",
+      "tradeslist_MNQ_15_5Xnew.xlsx",
+      "tradeslist_MNQ_60_17Xnew.xlsx",
+      "tradeslist_NG_60_91Xnew.xlsx"
+    ],
+    "symbols": [],
+    "intervals": [],
+    "strategies": [],
+    "direction": "All",
+    "start": null,
+    "end": null,
+    "contracts": {},
+    "margins": {},
+    "spike": false
+  }
+]
