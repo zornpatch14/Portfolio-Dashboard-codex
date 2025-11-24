@@ -1,7 +1,10 @@
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
 import os
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from api.app.routers import demo
 
 app = FastAPI(title="Portfolio API", version="0.1.0", docs_url="/docs")
 
@@ -13,6 +16,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(demo.router)
 
 
 @app.get("/health", tags=["health"])
