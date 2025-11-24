@@ -197,3 +197,62 @@ main {
   font-style: italic;
   padding: 12px 0;
 }
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.chip-active {
+  border-color: var(--accent);
+  background: rgba(76, 195, 255, 0.1);
+}
+
+.button-on {
+  background: linear-gradient(90deg, #3bff9a, #8fe3c7);
+  color: #04120f;
+}
+
+.button-off {
+  background: linear-gradient(90deg, #4cc3ff, #8094ff);
+  color: #04111f;
+}
+
+@media (max-width: 1080px) {
+  .two-column {
+    grid-template-columns: 1fr;
+  }
+}
