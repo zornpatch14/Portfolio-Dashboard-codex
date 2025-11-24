@@ -1,0 +1,69 @@
+{
+  "selections": [
+    {
+      "name": "mnq_combo_all",
+      "artifact": {
+        "trades_by_file": {
+          "tradeslist_CD_30_4Xnew.xlsx": "31924d09e94995ccc04f9cd18c0f4c0c52b274de",
+          "tradeslist_JY_30_92Xnew.xlsx": "5b0cf2146f08992447716969000009b768632997",
+          "tradeslist_JY_360_91Xnew.xlsx": "2a982ff3aea2b9a855e20a5b6be52e0ee8a9a251",
+          "tradeslist_M2K_15_8Xnew.xlsx": "fbda9d0f34f6a1347ceb47760daa571647435c40",
+          "tradeslist_M2K_30_35Xnew.xlsx": "3c882d7d0379251b5b6b39002e1d45b22b95dbe3",
+          "tradeslist_MES_15_4Xnew.xlsx": "db039bdd8d4552474f58b706e4f08f26f51e7626",
+          "tradeslist_MNQ_15_35Xnew.xlsx": "b8674224e414038aa2e3360de95da5ef23e33594",
+          "tradeslist_MNQ_15_3Xnew.xlsx": "12f99d067de3aac7ef2545769fde9e5da34f1d12",
+          "tradeslist_MNQ_15_4Xnew.xlsx": "fb1e4d2e5db318574c55618f6e664ef7db470901",
+          "tradeslist_MNQ_15_5Xnew.xlsx": "1e6c2c6df2d74809f04e2dd68d943ff6508043d5",
+          "tradeslist_MNQ_60_17Xnew.xlsx": "a65cfa727b18ef0abb54e3acfd05777fc6e73ae6",
+          "tradeslist_MNQ_60_92Xnew.xlsx": "baf5618b179deb6abb0cb6875ecbf3b03acd6a48",
+          "tradeslist_NE1_30_35Xnew.xlsx": "a9e641a3ce9d1e3a1265aa56bcc0e35195eb2d09",
+          "tradeslist_NG_30_9Xnew.xlsx": "6f3a61f9ffe12a0202260cd7b53d7fc06bb33f27",
+          "tradeslist_NG_60_91Xnew.xlsx": "48d4446a5989b2374e8c1b489d1da354288290f8"
+        },
+        "equity_by_file": {
+          "tradeslist_CD_30_4Xnew.xlsx": "868bc7294037cf69c9d9fe9b5a435e72f3610d0e",
+          "tradeslist_JY_30_92Xnew.xlsx": "be7aaaaeb198a494c99ccb32da20879d00eda707",
+          "tradeslist_JY_360_91Xnew.xlsx": "bc6916677bf4779ef363e60ec42704e02cfc921d",
+          "tradeslist_M2K_15_8Xnew.xlsx": "bb6d873aade8436843549557217493daf6e16086",
+          "tradeslist_M2K_30_35Xnew.xlsx": "c1430807b6cc175e127cee00ecc6cc7db729e9f8",
+          "tradeslist_MES_15_4Xnew.xlsx": "dd4f43b25fc132ed6c50da1e50790fe6dd047b05",
+          "tradeslist_MNQ_15_35Xnew.xlsx": "90a9bb3e79f9b006c03a73707b0df53863a2be56",
+          "tradeslist_MNQ_15_3Xnew.xlsx": "d66de0c48698e77d1d1325536d279a74d94eb5fb",
+          "tradeslist_MNQ_15_4Xnew.xlsx": "6ce0070c88ed52c078620e291110ee16eb09d72b",
+          "tradeslist_MNQ_15_5Xnew.xlsx": "ca4012fe181fa4203c8e383f336582343759b2d3",
+          "tradeslist_MNQ_60_17Xnew.xlsx": "a035e1a2728adcb4b85b056bbc78dc9c54de5b58",
+          "tradeslist_MNQ_60_92Xnew.xlsx": "f2f2dbb97c8fc107c985cb4f7b7c416ca584d068",
+          "tradeslist_NE1_30_35Xnew.xlsx": "f76d696864ed2a0281f85e739cda61d22f1e7907",
+          "tradeslist_NG_30_9Xnew.xlsx": "85154991419a2114b001ad1a48d3dd9b928ea279",
+          "tradeslist_NG_60_91Xnew.xlsx": "3464dfb54c3a32f8d8416a2538a4bb209080fb57"
+        }
+      },
+      "portfolio": {
+        "daily_return_pct": "57b6f72f44da667939d8d804bbc08ef4972b1038",
+        "pct_equity_index": "9f360affc0f739e533c20dadd708717b94aa2945",
+        "pct_equity": "bba97630a463c261b7568e819814692c989f81c0",
+        "total_nav": "3b83ab378c3e532a86b9b18fe1fae4b5b74144e3",
+        "files_included": [
+          "tradeslist_CD_30_4Xnew.xlsx",
+          "tradeslist_JY_30_92Xnew.xlsx",
+          "tradeslist_JY_360_91Xnew.xlsx",
+          "tradeslist_M2K_15_8Xnew.xlsx",
+          "tradeslist_M2K_30_35Xnew.xlsx",
+          "tradeslist_MES_15_4Xnew.xlsx",
+          "tradeslist_MNQ_15_35Xnew.xlsx",
+          "tradeslist_MNQ_15_3Xnew.xlsx",
+          "tradeslist_MNQ_15_4Xnew.xlsx",
+          "tradeslist_MNQ_15_5Xnew.xlsx",
+          "tradeslist_MNQ_60_17Xnew.xlsx",
+          "tradeslist_MNQ_60_92Xnew.xlsx",
+          "tradeslist_NE1_30_35Xnew.xlsx",
+          "tradeslist_NG_30_9Xnew.xlsx",
+          "tradeslist_NG_60_91Xnew.xlsx"
+        ]
+      },
+      "metrics_digest": "5f537fc29402c881b22a4af66b3e23032f08c4e3",
+      "allocator_digest": "ecd761f644665710b6e2543f1df9fadfa937de1a",
+      "cta_digest": "f887fbdbbce577f6f416661b9f591f6e4189951a"
+    }
+  ]
+}
