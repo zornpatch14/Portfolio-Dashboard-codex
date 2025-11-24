@@ -99,5 +99,6 @@ Authoritative plan for the multi-agent refactor from Dash to the API-first Next.
 - Branches: feature/<area>. Small, scoped PRs.
 - Update REBUILD_PLAN.md and TASK_BOARD.md with any interface or ownership change.
 - CI must pass (lint/type/unit/contract/parity/perf smoke/E2E where applicable) before merge.
+- Required PR check: `ci / build (pull_request)` must be green for auto-merge.
 - Breaking contract changes require updating OpenAPI, schemas, and parity expectations.
 - Integrator reviews cross-cutting changes and resolves conflicts.
