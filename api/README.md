@@ -1,6 +1,6 @@
 # API Skeleton
 
-This is a FastAPI scaffold for the new stack. It currently exposes a health check only. Agents should implement the full API surface described in `REBUILD_PLAN.md`.
+This is a FastAPI scaffold for the new stack. The `feature/api` branch wires the v1 endpoints described in `REBUILD_PLAN.md` (upload, file metadata, series, metrics, correlations, CTA, optimizers with SSE job streaming, and exports) to stub services so the OpenAPI contract is documented and explorable.
 
 ## Local dev
 ```sh
