@@ -51,6 +51,13 @@ def _drawdown_from_equity(equity) -> list[tuple[datetime, float]]:
     return values
 
 
+def _max_drawdown(equity) -> float:
+    dd = _drawdown_from_equity(equity)
+    if not dd:
+        return 0.0
+    return float(min(val for _, val in dd))
+
+
 class DataStore:
     """File-backed store that wraps ingest + basic compute."""
 
@@ -249,38 +256,41 @@ class DataStore:
 
         # Per-file metrics
         for path in paths:
-            bundle = self.cache.equity_curve(path)
-            net_profit = float(bundle["equity"][-1] - self.cache.starting_equity) if len(bundle) else 0.0
-            trades = len(self.cache.load_trades(path).trades)
-            rows.append(
-                MetricsRow(
-                    file_id=path.stem,
-                    metric="net_profit",
-                    value=net_profit,
-                    level="file",
-                )
-            )
-            rows.append(
-                MetricsRow(
-                    file_id=path.stem,
-                    metric="trades",
-                    value=float(trades),
-                    level="file",
-                )
-            )
+            equity = self.cache.equity_curve(path)
+            trades_df = self.cache.load_trades(path).trades
+            daily = self.cache.daily_returns(path)
 
-        # Portfolio metric
+            net_profit = float(equity["equity"][-1] - self.cache.starting_equity) if len(equity) else 0.0
+            trades = len(trades_df)
+            wins = int((trades_df["net_profit"] > 0).sum()) if trades else 0
+            win_rate = (wins / trades * 100.0) if trades else 0.0
+            expectancy = (net_profit / trades) if trades else 0.0
+            max_dd = _max_drawdown(equity)
+            avg_daily = float(daily["daily_return"].mean()) if len(daily) else 0.0
+
+            def add(metric: str, value: float) -> None:
+                rows.append(MetricsRow(file_id=path.stem, metric=metric, value=value, level="file"))
+
+            add("net_profit", net_profit)
+            add("trades", float(trades))
+            add("max_drawdown", max_dd)
+            add("win_rate", win_rate)
+            add("expectancy", expectancy)
+            add("avg_daily_return", avg_daily)
+
+        # Portfolio metrics
         view = self.aggregator.aggregate(paths)
         if len(view.equity):
             portfolio_net = float(view.equity["equity"][-1] - self.cache.starting_equity)
-            rows.append(
-                MetricsRow(
-                    file_id="portfolio",
-                    metric="net_profit",
-                    value=portfolio_net,
-                    level="portfolio",
-                )
-            )
+            port_dd = _max_drawdown(view.equity)
+            port_daily = float(view.daily_returns["daily_return"].mean()) if len(view.daily_returns) else 0.0
+            def addp(metric: str, value: float) -> None:
+                rows.append(MetricsRow(file_id="portfolio", metric=metric, value=value, level="portfolio"))
+
+            addp("net_profit", portfolio_net)
+            addp("trades", float(sum(len(self.cache.load_trades(p).trades) for p in paths)))
+            addp("max_drawdown", port_dd)
+            addp("avg_daily_return", port_daily)
 
         return MetricsResponse(selection=selection, rows=rows)
 
