@@ -1,21 +1,25 @@
 from __future__ import annotations
 
 import tempfile
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List
 from uuid import uuid4
 
+import numpy as np
 import polars as pl
 from fastapi import HTTPException, UploadFile, status
 
 from api.app.compute.caches import PerFileCache
 from api.app.compute.downsampling import downsample_timeseries
-from api.app.compute.portfolio import PortfolioAggregator
+from api.app.compute.portfolio import PortfolioAggregator, PortfolioView
 from api.app.ingest import IngestService, TradeFileMetadata
 from api.app.schemas import (
     FileMetadata,
     FileUploadResponse,
+    HistogramBucket,
+    HistogramResponse,
     MetricsResponse,
     MetricsRow,
     Selection,
@@ -62,8 +66,10 @@ class DataStore:
     """File-backed store that wraps ingest + basic compute."""
 
     def __init__(self, storage_root: str | Path | None = None) -> None:
-        self.ingest_service = IngestService(storage_root=storage_root)
-        self.cache = PerFileCache(storage_dir=Path(storage_root or ".") / ".cache")
+        root = Path(storage_root or os.getenv("DATA_ROOT", "./data"))
+        self.storage_root = root
+        self.ingest_service = IngestService(storage_root=root)
+        self.cache = PerFileCache(storage_dir=root / ".cache")
         self.aggregator = PortfolioAggregator(self.cache)
 
     # ---------------- ingest & metadata ----------------
@@ -128,6 +134,8 @@ class DataStore:
         symbols = set(selection.symbols or [])
         intervals = set(selection.intervals or [])
         strategies = set(selection.strategies or [])
+        start_date = selection.start_date
+        end_date = selection.end_date
 
         def keep(meta: TradeFileMetadata) -> bool:
             if symbols and meta.symbol and meta.symbol not in symbols:
@@ -135,6 +143,10 @@ class DataStore:
             if intervals and meta.interval is not None and str(meta.interval) not in intervals:
                 return False
             if strategies and meta.strategy and meta.strategy not in strategies:
+                return False
+            if start_date and meta.date_max and meta.date_max.date() < start_date:
+                return False
+            if end_date and meta.date_min and meta.date_min.date() > end_date:
                 return False
             return True
 
@@ -156,99 +168,97 @@ class DataStore:
             points.append(SeriesPoint(timestamp=ts_val, value=float(row[value_key])))
         return points
 
-    # ---------------- series & metrics ----------------
-    def series(self, series_name: str, selection: Selection, downsample: bool) -> SeriesResponse:
+    def _view_for_selection(self, selection: Selection) -> PortfolioView:
         paths = self._paths_for_selection(selection)
         view = self.aggregator.aggregate(paths)
+        return self._filter_view_by_date(view, selection)
+
+    def _filter_view_by_date(self, view: PortfolioView, selection: Selection) -> PortfolioView:
+        start_dt = selection.start_date
+        end_dt = selection.end_date
+        if not start_dt and not end_dt:
+            return view
+
+        start_ts = datetime.combine(start_dt, datetime.min.time()) if start_dt else None
+        end_ts = datetime.combine(end_dt, datetime.max.time()) if end_dt else None
+
+        def filter_frame(frame: pl.DataFrame, column: str, is_date: bool = False) -> pl.DataFrame:
+            out = frame
+            start_bound = start_dt if is_date else start_ts
+            end_bound = end_dt if is_date else end_ts
+            if start_bound:
+                out = out.filter(pl.col(column) >= start_bound)
+            if end_bound:
+                out = out.filter(pl.col(column) <= end_bound)
+            return out
+
+        view.equity = filter_frame(view.equity, "timestamp")
+        view.percent_equity = filter_frame(view.percent_equity, "timestamp")
+        view.net_position = filter_frame(view.net_position, "timestamp")
+        view.margin = filter_frame(view.margin, "timestamp")
+        if start_dt or end_dt:
+            view.daily_returns = filter_frame(view.daily_returns, "date", is_date=True)
+        return view
+
+    # ---------------- series & metrics ----------------
+    def series(self, series_name: str, selection: Selection, downsample: bool) -> SeriesResponse:
+        view = self._view_for_selection(selection)
+
+        def build_timeseries(frame: pl.DataFrame, value_col: str, label: str) -> SeriesResponse:
+            raw = len(frame)
+            sampled = raw
+            if downsample:
+                result = downsample_timeseries(frame, "timestamp", value_col, target_points=2000)
+                frame = result.downsampled
+                raw = result.raw_count
+                sampled = result.downsampled_count
+            data = self._to_points(frame.iter_rows(named=True), "timestamp", value_col)
+            return SeriesResponse(
+                series=label,
+                selection=selection,
+                downsampled=downsample,
+                raw_count=raw,
+                downsampled_count=sampled,
+                data=data,
+            )
 
         if series_name == "equity":
-            frame = view.equity
-            if downsample:
-                result = downsample_timeseries(frame, "timestamp", "equity", target_points=2000)
-                frame = result.downsampled
-                raw = result.raw_count
-                sampled = result.downsampled_count
-            else:
-                raw = len(frame)
-                sampled = len(frame)
-            data = self._to_points(frame.iter_rows(named=True), "timestamp", "equity")
-            return SeriesResponse(
-                series="equity",
-                selection=selection,
-                downsampled=downsample,
-                raw_count=raw,
-                downsampled_count=sampled,
-                data=data,
-            )
+            return build_timeseries(view.equity, "equity", "equity")
 
         if series_name == "equity_percent":
-            frame = view.percent_equity
-            if downsample:
-                result = downsample_timeseries(frame, "timestamp", "percent_equity", target_points=2000)
-                frame = result.downsampled
-                raw = result.raw_count
-                sampled = result.downsampled_count
-            else:
-                raw = len(frame)
-                sampled = len(frame)
-            data = self._to_points(frame.iter_rows(named=True), "timestamp", "percent_equity")
-            return SeriesResponse(
-                series="equity_percent",
-                selection=selection,
-                downsampled=downsample,
-                raw_count=raw,
-                downsampled_count=sampled,
-                data=data,
-            )
+            return build_timeseries(view.percent_equity, "percent_equity", "equity_percent")
 
         if series_name in {"drawdown", "intraday_drawdown"}:
-            values = _drawdown_from_equity(view.equity)
-            raw = len(values)
-            sampled = raw
-            if downsample and raw > 0:
-                ts = [v[0] for v in values]
-                dd = [v[1] for v in values]
-                frame = view.equity.with_columns(
-                    pl.Series(name="drawdown", values=dd)
-                )
-                result = downsample_timeseries(frame, "timestamp", "drawdown", target_points=2000)
-                values = list(zip(result.downsampled["timestamp"], result.downsampled["drawdown"]))
-                sampled = result.downsampled_count
-            data = [SeriesPoint(timestamp=ts, value=float(val)) for ts, val in values]
-            return SeriesResponse(
-                series="drawdown",
-                selection=selection,
-                downsampled=downsample,
-                raw_count=raw,
-                downsampled_count=sampled,
-                data=data,
+            dd_values = _drawdown_from_equity(view.equity)
+            frame = pl.DataFrame(dd_values, schema=["timestamp", "drawdown"]) if dd_values else pl.DataFrame(
+                {"timestamp": [], "drawdown": []}
             )
+            return build_timeseries(frame, "drawdown", "drawdown")
 
         if series_name == "netpos":
-            frame = view.net_position
-            data = self._to_points(frame.iter_rows(named=True), "timestamp", "net_position")
-            return SeriesResponse(
-                series="netpos",
-                selection=selection,
-                downsampled=False,
-                raw_count=len(data),
-                downsampled_count=len(data),
-                data=data,
-            )
+            return build_timeseries(view.net_position, "net_position", "netpos")
 
         if series_name == "margin":
-            frame = view.margin
-            data = self._to_points(frame.iter_rows(named=True), "timestamp", "margin_used")
-            return SeriesResponse(
-                series="margin",
-                selection=selection,
-                downsampled=False,
-                raw_count=len(data),
-                downsampled_count=len(data),
-                data=data,
-            )
+            return build_timeseries(view.margin, "margin_used", "margin")
 
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Series not implemented")
+
+    def histogram(self, selection: Selection, bins: int = 20) -> HistogramResponse:
+        view = self._view_for_selection(selection)
+        returns = view.daily_returns
+
+        if returns.is_empty():
+            return HistogramResponse(label="return_distribution", selection=selection, buckets=[])
+
+        values = returns["daily_return"].to_numpy()
+        hist, edges = np.histogram(values, bins=bins)
+
+        buckets: list[HistogramBucket] = []
+        for count, start, end in zip(hist, edges[:-1], edges[1:]):
+            label = f"{start * 100:.2f}% to {end * 100:.2f}%"
+            buckets.append(HistogramBucket(bucket=label, count=int(count)))
+
+        return HistogramResponse(label="return_distribution", selection=selection, buckets=buckets)
 
     def metrics(self, selection: Selection) -> MetricsResponse:
         paths = self._paths_for_selection(selection)
@@ -279,7 +289,7 @@ class DataStore:
             add("avg_daily_return", avg_daily)
 
         # Portfolio metrics
-        view = self.aggregator.aggregate(paths)
+        view = self._view_for_selection(selection)
         if len(view.equity):
             portfolio_net = float(view.equity["equity"][-1] - self.cache.starting_equity)
             port_dd = _max_drawdown(view.equity)
@@ -293,6 +303,4 @@ class DataStore:
             addp("avg_daily_return", port_daily)
 
         return MetricsResponse(selection=selection, rows=rows)
-
-
-store = DataStore(storage_root=Path(".") / "data")
+store = DataStore()

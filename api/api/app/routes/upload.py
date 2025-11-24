@@ -15,5 +15,4 @@ async def upload_files(files: List[UploadFile] = File(...)) -> FileUploadRespons
     if not files:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files provided")
 
-    filenames = [file.filename for file in files]
-    return store.ingest(filenames)
+    return store.ingest(files)
