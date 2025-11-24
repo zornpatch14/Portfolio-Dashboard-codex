@@ -6,6 +6,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+.dash-cache/
 
 # --- Virtual environments (keep ALL out of Git) ---
 .venv/
