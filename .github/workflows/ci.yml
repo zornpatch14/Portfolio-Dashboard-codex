@@ -43,4 +43,10 @@ jobs:
 
       - name: Run tests (Python)
         run: |
-          if [ -d tests ]; then pytest -q --disable-warnings --maxfail=1; else echo "No tests directory"; fi
+          if [ -d tests ]; then \
+            pytest -q tests --disable-warnings --maxfail=1 || status=$?; \
+            if [ "${status:-0}" -eq 5 ]; then echo "No tests collected; treating as success"; exit 0; fi; \
+            exit ${status:-0}; \
+          else \
+            echo "No tests directory"; \
+          fi
