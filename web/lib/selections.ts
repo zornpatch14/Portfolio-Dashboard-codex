@@ -23,5 +23,5 @@ export function selectionLabel(selection: Selection): string {
   const symbols = selection.symbols.length ? selection.symbols.join(', ') : 'All symbols';
   const intervals = selection.intervals.length ? selection.intervals.join(', ') : 'All intervals';
   const strategies = selection.strategies.length ? selection.strategies.join(', ') : 'All strategies';
-  return `${symbols} · ${intervals} · ${strategies}`;
+  return `${symbols} | ${intervals} | ${strategies}`;
 }

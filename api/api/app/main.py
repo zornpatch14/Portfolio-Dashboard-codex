@@ -2,7 +2,10 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import os
+from fastapi.responses import JSONResponse
+
+from .routes import correlations, cta, exports, files, metrics, optimizer, series, upload
+from .routers import demo
 
 app = FastAPI(title="Portfolio API", version="0.1.0", docs_url="/docs")
 
@@ -19,3 +22,15 @@ app.add_middleware(
 @app.get("/health", tags=["health"])
 async def health() -> JSONResponse:
     return JSONResponse({"status": "ok"})
+
+
+# Register API routers (currently stubbed implementations; replace with real services).
+app.include_router(upload.router)
+app.include_router(files.router)
+app.include_router(series.router)
+app.include_router(metrics.router)
+app.include_router(correlations.router)
+app.include_router(cta.router)
+app.include_router(optimizer.router)
+app.include_router(exports.router)
+app.include_router(demo.router)
