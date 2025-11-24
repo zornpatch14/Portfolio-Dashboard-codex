@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 
 from ..dependencies import DownsampleFlag, SelectionQueryParams
 from ..schemas import SeriesResponse
-from ..services.stub_store import store
+from ..services.data_store import store
 
 router = APIRouter(prefix="/api/v1/series", tags=["series"])
 

@@ -5,7 +5,7 @@ from typing import List
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
 from ..schemas import FileUploadResponse
-from ..services.stub_store import store
+from ..services.data_store import store
 
 router = APIRouter(prefix="/api/v1", tags=["upload"])
 

@@ -22,7 +22,14 @@ class LoadedTrades:
 
 
 def _make_file_id(path: Path) -> str:
-    """Create a short, deterministic id for a trades file."""
+    """Create a short, deterministic id for a trades file.
+
+    If the stem already looks like a short id (e.g., produced by ingest),
+    reuse it to keep cache keys stable. Otherwise, hash the filename.
+    """
+    stem = path.stem
+    if 6 <= len(stem) <= 16 and stem.replace("-", "").isalnum():
+        return stem[:12]
     digest = hashlib.sha256(path.name.encode()).hexdigest()
     return digest[:12]
 
@@ -46,11 +53,21 @@ def _compute_net_profit(entry_price: float, exit_price: float, direction: str, c
 
 def load_trade_file(path: Path) -> LoadedTrades:
     """
-    Parse a TradeStation XLSX file into a normalized Polars DataFrame.
+    Parse a TradeStation XLSX *or* ingested Parquet file into a normalized Polars DataFrame.
 
-    The source sheets contain alternating entry/exit rows. We pair them and
-    derive a simplified schema used by downstream caches.
+    The ingested path (Parquet) already contains paired trades; XLSX source sheets
+    contain alternating entry/exit rows. Both are coerced into a simplified schema
+    used by downstream caches.
     """
+
+    if path.suffix.lower() == ".parquet":
+        trades = pl.read_parquet(path)
+        # Ensure required columns exist with sensible defaults.
+        if "margin_per_contract" not in trades.columns:
+            trades = trades.with_columns(pl.lit(DEFAULT_MARGIN_PER_CONTRACT).alias("margin_per_contract"))
+        if "direction" in trades.columns:
+            trades = trades.with_columns(pl.col("direction").str.to_lowercase())
+        return LoadedTrades(file_id=_make_file_id(path), path=path, trades=trades)
 
     df = pd.read_excel(path, skiprows=3)
     records: List[dict] = []
@@ -76,7 +93,7 @@ def load_trade_file(path: Path) -> LoadedTrades:
             {
                 "entry_time": entry_time,
                 "exit_time": exit_time,
-                "direction": entry_action,
+                "direction": entry_action.lower(),
                 "entry_price": entry_price,
                 "exit_price": exit_price,
                 "contracts": contracts,

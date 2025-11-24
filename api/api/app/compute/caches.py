@@ -102,9 +102,10 @@ class PerFileCache:
     def _compute_net_positions(self, loaded: LoadedTrades) -> pl.DataFrame:
         events = []
         for row in loaded.trades.iter_rows(named=True):
-            direction = row["direction"].lower()
+            direction = str(row.get("direction", "")).lower()
             contracts = int(row["contracts"])
-            signed = contracts if direction == "buy" else -contracts
+            is_long = direction in {"buy", "long", "buy to open", "buy to cover"}
+            signed = contracts if is_long else -contracts
             events.append((row["entry_time"], signed))
             events.append((row["exit_time"], -signed))
 
