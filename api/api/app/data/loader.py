@@ -61,6 +61,10 @@ def load_trade_file(path: Path) -> LoadedTrades:
 
     if path.suffix.lower() == ".parquet":
         trades = pl.read_parquet(path)
+        # Defensive resort to ensure deterministic ordering for downstream cum_sums.
+        sort_keys = [key for key in ["exit_time", "entry_time", "trade_no"] if key in trades.columns]
+        if sort_keys:
+            trades = trades.sort(sort_keys)
         # Ensure required columns exist with sensible defaults.
         if "margin_per_contract" not in trades.columns:
             trades = trades.with_columns(pl.lit(DEFAULT_MARGIN_PER_CONTRACT).alias("margin_per_contract"))
