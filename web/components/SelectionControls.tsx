@@ -117,81 +117,8 @@ export function SelectionControls({ selection, availableFiles, onChange }: Props
           </div>
         </div>
 
-        <div className="grid-2">
-          <div className="card" style={{ marginTop: 6 }}>
-            <div className="text-muted small" style={{ marginBottom: 8 }}>Contract multipliers per file</div>
-            <div className="chips" style={{ gap: 10 }}>
-              {availableFiles.map((file) => {
-                const value = selection.contracts[file] ?? 1;
-                return (
-                  <label key={file} className="chip" style={{ cursor: 'text', gap: 8, alignItems: 'center', display: 'inline-flex' }}>
-                    <span>{file}</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.25}
-                      className="input"
-                      style={{ width: 90 }}
-                      value={value}
-                      onChange={(event) => {
-                        const next = Number(event.target.value);
-                        onChange({ ...selection, contracts: { ...selection.contracts, [file]: Number.isNaN(next) ? 0 : next } });
-                      }}
-                    />
-                  </label>
-                );
-              })}
-            </div>
-            <div className="text-muted small" style={{ marginTop: 8 }}>Match the Dash "Included files" + contracts grid.</div>
-          </div>
-
-          <div className="card" style={{ marginTop: 6 }}>
-            <div className="text-muted small" style={{ marginBottom: 8 }}>Margin overrides (per contract)</div>
-            <div className="chips" style={{ gap: 10 }}>
-              {availableFiles.map((file) => {
-                const value = selection.margins[file] ?? '';
-                return (
-                  <label key={file} className="chip" style={{ cursor: 'text', gap: 8, alignItems: 'center', display: 'inline-flex' }}>
-                    <span>{file}</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step={100}
-                      className="input"
-                      style={{ width: 110 }}
-                      value={value}
-                      onChange={(event) => {
-                        const next = Number(event.target.value);
-                        onChange({ ...selection, margins: { ...selection.margins, [file]: Number.isNaN(next) ? 0 : next } });
-                      }}
-                    />
-                  </label>
-                );
-              })}
-            </div>
-            <div className="text-muted small" style={{ marginTop: 8 }}>Keeps parity with legacy margin override controls.</div>
-          </div>
-        </div>
       </div>
 
-      <div style={{ marginTop: 18 }}>
-        <div className="text-muted small" style={{ marginBottom: 8 }}>Files in selection</div>
-        <div className="chips">
-          {availableFiles.map((file) => {
-            const active = selection.files.includes(file);
-            return (
-              <button
-                key={file}
-                type="button"
-                className={`chip ${active ? 'chip-active' : ''}`}
-                onClick={() => toggleFile(file)}
-              >
-                {file}
-              </button>
-            );
-          })}
-        </div>
-      </div>
     </div>
   );
 }

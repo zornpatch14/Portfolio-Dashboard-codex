@@ -4,7 +4,6 @@ import { useMemo, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import MetricsGrid from '../components/MetricsGrid';
 import SeriesChart from '../components/SeriesChart';
-import { SelectionList } from '../components/SelectionList';
 import { HistogramChart } from '../components/HistogramChart';
 import { SelectionControls } from '../components/SelectionControls';
 import { CorrelationHeatmap } from '../components/CorrelationHeatmap';
@@ -684,51 +683,71 @@ export default function HomePage() {
       <div className="grid-2" style={{ marginTop: 14 }}>
         <div className="card">
           <strong>Included files</strong>
-          <div className="chips" style={{ marginTop: 8 }}>
+          <div className="file-rows" style={{ marginTop: 10, display: 'grid', gap: 10 }}>
             {availableFiles.map((file) => {
               const active = activeSelection.files.includes(file);
+              const contractValue = activeSelection.contracts[file] ?? 1;
+              const marginValue = activeSelection.margins[file] ?? '';
               return (
-                <button
+                <div
                   key={file}
-                  type="button"
-                  className={`chip ${active ? 'chip-active' : ''}`}
-                  onClick={() =>
-                    setActiveSelection((prev) => ({
-                      ...prev,
-                      files: active ? prev.files.filter((f) => f !== file) : [...prev.files, file],
-                    }))
-                  }
+                  className="card"
+                  style={{
+                    padding: '10px 12px',
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 120px 140px',
+                    gap: 10,
+                    alignItems: 'center',
+                  }}
                 >
-                  {file}
-                </button>
+                  <button
+                    type="button"
+                    className={`chip ${active ? 'chip-active' : ''}`}
+                    onClick={() =>
+                      setActiveSelection((prev) => ({
+                        ...prev,
+                        files: active ? prev.files.filter((f) => f !== file) : [...prev.files, file],
+                      }))
+                    }
+                    style={{ justifyContent: 'flex-start' }}
+                  >
+                    {file}
+                  </button>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.25}
+                    className="input"
+                    value={contractValue}
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      setActiveSelection((prev) => ({
+                        ...prev,
+                        contracts: { ...prev.contracts, [file]: Number.isNaN(next) ? 0 : next },
+                      }));
+                    }}
+                    placeholder="Contracts"
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    step={100}
+                    className="input"
+                    value={marginValue}
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      setActiveSelection((prev) => ({
+                        ...prev,
+                        margins: { ...prev.margins, [file]: Number.isNaN(next) ? 0 : next },
+                      }));
+                    }}
+                    placeholder="Margin $/contract"
+                  />
+                </div>
               );
             })}
           </div>
-          <div className="text-muted small" style={{ marginTop: 8 }}>Matches Dash file checklist + contract inputs.</div>
-        </div>
-
-        <div className="card">
-          <strong>Export options</strong>
-          <div className="flex gap-md" style={{ marginTop: 10, alignItems: 'center' }}>
-            <label className="field-label" htmlFor="downsample" style={{ margin: 0 }}>Downsample series</label>
-            <input
-              id="downsample"
-              type="checkbox"
-              checked={includeDownsample}
-              onChange={(event) => setIncludeDownsample(event.target.checked)}
-            />
-            <label className="field-label" htmlFor="format" style={{ margin: 0 }}>Export format</label>
-            <select
-              id="format"
-              className="input"
-              value={exportFormat}
-              onChange={(event) => setExportFormat(event.target.value as 'csv' | 'parquet')}
-            >
-              <option value="csv">CSV</option>
-              <option value="parquet">Parquet</option>
-            </select>
-          </div>
-          <div className="text-muted small" style={{ marginTop: 8 }}>Maps to /api/v1/export/trades and /api/v1/export/metrics.</div>
+          <div className="text-muted small" style={{ marginTop: 8 }}>Toggle files and edit contracts/margin per file.</div>
         </div>
       </div>
 
@@ -746,21 +765,10 @@ export default function HomePage() {
             Mirrors Dash account equity input (used for purchasing power, allocator seed, and margin tab).
           </div>
         </div>
-        <div className="card">
-          <strong>Spike handling</strong>
-          <div className="flex gap-md" style={{ alignItems: 'center', marginTop: 10 }}>
-            <label className="field-label" htmlFor="spikes" style={{ margin: 0 }}>Include trade-level spikes</label>
-            <input
-              id="spikes"
-              type="checkbox"
-              checked={activeSelection.spike}
-              onChange={(event) => setActiveSelection({ ...activeSelection, spike: event.target.checked })}
-            />
-          </div>
-          <div className="text-muted small" style={{ marginTop: 8 }}>
-            Mirrors the Dash spike toggle (overlays on equity/drawdown/margin charts).
-          </div>
-        </div>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <SelectionControls selection={activeSelection} availableFiles={availableFiles} onChange={setActiveSelection} />
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
@@ -792,24 +800,29 @@ export default function HomePage() {
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 18, marginBottom: 12 }}>
-        <div className="flex gap-md" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div className="text-muted small">Active selection</div>
-            <strong>{activeSelection.name}</strong>
-            <div className="text-muted small" style={{ marginTop: 6 }}>
-              {activeSelection.files.join(', ')}
-            </div>
-          </div>
-          <div className="badge">{activeSelection.files.length} files</div>
+      <div className="card" style={{ marginTop: 18 }}>
+        <strong>Export options</strong>
+        <div className="flex gap-md" style={{ marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label className="field-label" htmlFor="downsample" style={{ margin: 0 }}>Downsample series</label>
+          <input
+            id="downsample"
+            type="checkbox"
+            checked={includeDownsample}
+            onChange={(event) => setIncludeDownsample(event.target.checked)}
+          />
+          <label className="field-label" htmlFor="format" style={{ margin: 0 }}>Export format</label>
+          <select
+            id="format"
+            className="input"
+            value={exportFormat}
+            onChange={(event) => setExportFormat(event.target.value as 'csv' | 'parquet')}
+            style={{ maxWidth: 200 }}
+          >
+            <option value="csv">CSV</option>
+            <option value="parquet">Parquet</option>
+          </select>
         </div>
-        <div style={{ marginTop: 12 }}>
-          <SelectionList selections={selections} active={activeSelection} onSelect={setActiveSelection} />
-        </div>
-      </div>
-
-      <div style={{ marginTop: 12 }}>
-        <SelectionControls selection={activeSelection} availableFiles={availableFiles} onChange={setActiveSelection} />
+        <div className="text-muted small" style={{ marginTop: 8 }}>Maps to /api/v1/export/trades and /api/v1/export/metrics.</div>
       </div>
     </div>
   );
