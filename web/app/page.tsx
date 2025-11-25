@@ -52,6 +52,7 @@ export default function HomePage() {
   const [plotDrawdownEnabled, setPlotDrawdownEnabled] = useState<Record<string, boolean>>({});
   const [plotMarginEnabled, setPlotMarginEnabled] = useState<Record<string, boolean>>({});
   const [plotHistogramEnabled, setPlotHistogramEnabled] = useState<Record<string, boolean>>({});
+  const [riskfolioMode, setRiskfolioMode] = useState<'mean-risk' | 'risk-parity' | 'hierarchical'>('mean-risk');
   const apiBase = process.env.NEXT_PUBLIC_API_BASE;
 
   const availableFiles = useMemo(
@@ -734,132 +735,265 @@ export default function HomePage() {
         {activeBadge}
       </div>
       <p className="text-muted small" style={{ marginTop: 4 }}>
-        Carries over the legacy Riskfolio controls: objective, return model, risk measure, risk-free rate, utility lambda, bounds,
-        and contract sizing. Backend wiring comes later; the UI matches all Dash controls.
+        Upload and select files to enable optimization. Controls mirror the legacy Riskfolio tab (objective, return model, risk
+        measure, covariance method, bounds, budget, caps, and utility inputs). Backend wiring comes later.
       </p>
 
-      <div className="grid-2" style={{ marginTop: 12 }}>
-        <div className="card">
-          <label className="field-label" htmlFor="objective">Objective</label>
-          <select id="objective" className="input" defaultValue="sharpe">
-            <option value="sharpe">Max Risk-Adjusted Return (Sharpe)</option>
-            <option value="min_risk">Min Risk</option>
-            <option value="max_return">Max Return</option>
-            <option value="utility">Utility</option>
-          </select>
-          <label className="field-label" htmlFor="return-model" style={{ marginTop: 12 }}>Return Model</label>
-          <select id="return-model" className="input" defaultValue="arithmetic">
-            <option value="arithmetic">Arithmetic</option>
-            <option value="approx_log">Approximate Log</option>
-            <option value="log">Exact Log</option>
-          </select>
-          <label className="field-label" htmlFor="risk-measure" style={{ marginTop: 12 }}>Risk Measure</label>
-          <select id="risk-measure" className="input" defaultValue="variance">
-            <option value="variance">Variance</option>
-            <option value="semi_variance">Semi-Variance</option>
-            <option value="cvar">CVaR</option>
-            <option value="cdar">CDaR</option>
-            <option value="evar">EVaR</option>
-          </select>
-        </div>
-
-        <div className="card">
-          <label className="field-label" htmlFor="rf">Risk-Free Rate (annual %)</label>
-          <input id="rf" className="input" type="number" step={0.05} defaultValue={0} />
-          <label className="field-label" htmlFor="risk-aversion" style={{ marginTop: 12 }}>Risk Aversion (Utility)</label>
-          <input id="risk-aversion" className="input" type="number" step={0.1} defaultValue={2} />
-          <label className="field-label" htmlFor="alpha" style={{ marginTop: 12 }}>Confidence Level alpha</label>
-          <input id="alpha" className="input" type="number" min={0} max={1} step={0.01} defaultValue={0.95} />
-          <label className="field-label" htmlFor="bounds" style={{ marginTop: 12 }}>Weight Bounds (min / max)</label>
-          <div className="flex gap-sm">
-            <input className="input" type="number" defaultValue={0} />
-            <input className="input" type="number" defaultValue={0.6} />
-          </div>
+      <div className="card" style={{ marginTop: 10 }}>
+        <div className="tabs" style={{ borderBottom: 'none', gap: 6 }}>
+          <button
+            type="button"
+            className={`tab ${riskfolioMode === 'mean-risk' ? 'tab-active' : ''}`}
+            onClick={() => setRiskfolioMode('mean-risk')}
+          >
+            Mean-Risk
+          </button>
+          <button type="button" className="tab" style={{ opacity: 0.5 }} disabled>
+            Risk Parity (coming soon)
+          </button>
+          <button type="button" className="tab" style={{ opacity: 0.5 }} disabled>
+            Hierarchical (coming soon)
+          </button>
         </div>
       </div>
 
-      <div className="grid-2" style={{ marginTop: 16 }}>
-        <div className="card">
-          <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-            <strong>Allocation summary</strong>
-            <button type="button" className="button" disabled>
-              Run optimization
-            </button>
-          </div>
+      {riskfolioMode === 'mean-risk' ? (
+        <>
           <div className="grid-2" style={{ marginTop: 12 }}>
-            <div className="metric-card">
-              <span className="text-muted small">Expected Return</span>
-              <strong>{optimizerQuery.data?.summary.expectedReturn}%</strong>
+            <div className="card">
+              <label className="field-label" htmlFor="objective">Objective</label>
+              <select id="objective" className="input" defaultValue="max_rar">
+                <option value="max_return">Maximum Return</option>
+                <option value="min_risk">Minimum Risk</option>
+                <option value="max_rar">Maximum Risk-Adjusted Return Ratio</option>
+                <option value="utility">Maximum Utility</option>
+              </select>
+              <label className="field-label" htmlFor="return-model" style={{ marginTop: 12 }}>Return Model</label>
+              <select id="return-model" className="input" defaultValue="arithmetic">
+                <option value="arithmetic">Mean Historical Return (Arithmetic)</option>
+                <option value="approx_log">Approximate Log</option>
+                <option value="log">Exact Log</option>
+              </select>
+              <label className="field-label" htmlFor="risk-measure" style={{ marginTop: 12 }}>Risk Measure</label>
+              <select id="risk-measure" className="input" defaultValue="variance">
+                <option value="variance">Variance</option>
+                <option value="std">Standard Deviation</option>
+                <option value="semi_variance">Semi-Variance</option>
+                <option value="cvar">CVaR</option>
+                <option value="cdar">CDaR</option>
+                <option value="evar">EVaR</option>
+              </select>
+              <label className="field-label" htmlFor="cov-method" style={{ marginTop: 12 }}>Covariance Method</label>
+              <select id="cov-method" className="input" defaultValue="sample">
+                <option value="sample">Sample (Normal)</option>
+                <option value="ewma">Exponentially Weighted (EWMA)</option>
+                <option value="ledoit-wolf">Ledoit-Wolf</option>
+              </select>
             </div>
-            <div className="metric-card">
-              <span className="text-muted small">Risk</span>
-              <strong>{optimizerQuery.data?.summary.risk}%</strong>
-            </div>
-            <div className="metric-card">
-              <span className="text-muted small">Sharpe</span>
-              <strong>{optimizerQuery.data?.summary.sharpe}</strong>
-            </div>
-            <div className="metric-card">
-              <span className="text-muted small">Max Drawdown</span>
-              <strong>{optimizerQuery.data?.summary.maxDrawdown}%</strong>
-            </div>
-          </div>
-          <div className="text-muted small" style={{ marginTop: 8 }}>
-            Objective: {optimizerQuery.data?.summary.objective} | Capital: {`$${optimizerQuery.data?.summary.capital.toLocaleString()}`}
-          </div>
-        </div>
 
-        <div className="card">
-          <strong>Contract sizing (margin aware)</strong>
-          <table className="compact-table">
-            <thead>
-              <tr>
-                <th>Asset</th>
-                <th>Contracts</th>
-                <th>Notional</th>
-                <th>Margin</th>
-              </tr>
-            </thead>
-            <tbody>
-              {optimizerQuery.data?.contracts.map((row) => (
-                <tr key={row.asset}>
-                  <td>{row.asset}</td>
-                  <td>{row.contracts}</td>
-                  <td>{`$${row.notional.toLocaleString()}`}</td>
-                  <td>{`$${row.margin.toLocaleString()}`}</td>
+            <div className="card">
+              <label className="field-label" htmlFor="rf">Risk-Free Rate (annual %)</label>
+              <input id="rf" className="input" type="number" step={0.05} defaultValue={0} />
+              <label className="field-label" htmlFor="risk-aversion" style={{ marginTop: 12 }}>Risk Aversion (Utility only)</label>
+              <input id="risk-aversion" className="input" type="number" step={0.1} defaultValue={2} />
+              <label className="field-label" htmlFor="alpha" style={{ marginTop: 12 }}>Confidence Level alpha</label>
+              <input id="alpha" className="input" type="number" min={0} max={1} step={0.01} defaultValue={0.95} />
+              <label className="field-label" htmlFor="bounds" style={{ marginTop: 12 }}>Weight Bounds (min / max)</label>
+              <div className="flex gap-sm">
+                <input className="input" type="number" defaultValue={0} />
+                <input className="input" type="number" defaultValue={0.6} />
+              </div>
+              <label className="field-label" htmlFor="budget" style={{ marginTop: 12 }}>Budget (sum of weights)</label>
+              <input id="budget" className="input" type="number" step={0.1} defaultValue={1} />
+              <label className="field-label" htmlFor="group-caps" style={{ marginTop: 12 }}>Group Caps (symbol=cap, comma separated)</label>
+              <input id="group-caps" className="input" placeholder="e.g. MNQ,MES=0.5" />
+              <label className="field-label" htmlFor="strategy-caps" style={{ marginTop: 12 }}>Strategy Caps (strategy=cap, comma separated)</label>
+              <input id="strategy-caps" className="input" placeholder="e.g. trend=0.6, mean_reversion=0.4" />
+              <label className="field-label" htmlFor="turnover" style={{ marginTop: 12 }}>Turnover Cap (reserved)</label>
+              <input id="turnover" className="input" placeholder="Reserved" disabled />
+            </div>
+          </div>
+
+          <div className="card" style={{ marginTop: 14 }}>
+            <strong>Optimize</strong>
+            <div className="flex gap-md" style={{ marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button type="button" className="button" disabled>
+                Optimize
+              </button>
+              <div className="text-muted small">Progress</div>
+              <div style={{ flex: 1, minWidth: 180, background: '#1f2f4a', borderRadius: 6, height: 10, overflow: 'hidden' }}>
+                <div style={{ width: '12%', background: '#4cc3ff', height: '100%' }} />
+              </div>
+            </div>
+            <div className="text-muted small" style={{ marginTop: 8 }}>
+              Riskfolio results will appear below (efficient frontier, risk contribution, backtested equity, asset correlation).
+            </div>
+          </div>
+
+          <div className="grid-2" style={{ marginTop: 16 }}>
+            <div className="card">
+              <strong>Allocation summary</strong>
+              <div className="grid-2" style={{ marginTop: 12 }}>
+                <div className="metric-card">
+                  <span className="text-muted small">Expected Return</span>
+                  <strong>{optimizerQuery.data?.summary.expectedReturn}%</strong>
+                </div>
+                <div className="metric-card">
+                  <span className="text-muted small">Risk</span>
+                  <strong>{optimizerQuery.data?.summary.risk}%</strong>
+                </div>
+                <div className="metric-card">
+                  <span className="text-muted small">Sharpe</span>
+                  <strong>{optimizerQuery.data?.summary.sharpe}</strong>
+                </div>
+                <div className="metric-card">
+                  <span className="text-muted small">Max Drawdown</span>
+                  <strong>{optimizerQuery.data?.summary.maxDrawdown}%</strong>
+                </div>
+              </div>
+              <div className="text-muted small" style={{ marginTop: 8 }}>
+                Objective: {optimizerQuery.data?.summary.objective} | Capital: {`$${optimizerQuery.data?.summary.capital.toLocaleString()}`}
+              </div>
+            </div>
+
+            <div className="card">
+              <strong>Contract sizing (margin aware)</strong>
+              <table className="compact-table">
+                <thead>
+                  <tr>
+                    <th>Asset</th>
+                    <th>Contracts</th>
+                    <th>Notional</th>
+                    <th>Margin</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {optimizerQuery.data?.contracts.map((row) => (
+                    <tr key={row.asset}>
+                      <td>{row.asset}</td>
+                      <td>{row.contracts}</td>
+                      <td>{`$${row.notional.toLocaleString()}`}</td>
+                      <td>{`$${row.margin.toLocaleString()}`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="card" style={{ marginTop: 14 }}>
+            <strong>Weights</strong>
+            <table className="compact-table">
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Weight</th>
+                  <th>Contracts</th>
+                  <th>Margin/Contract</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+              </thead>
+              <tbody>
+                {optimizerQuery.data?.weights.map((row) => (
+                  <tr key={row.asset}>
+                    <td>{row.asset}</td>
+                    <td>{row.weight}</td>
+                    <td>{row.contracts}</td>
+                    <td>{`$${row.marginPerContract.toLocaleString()}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="text-muted small" style={{ marginTop: 8 }}>
+              Includes the Dash inverse-vol fallback (set contracts to zero to exclude) and mirrors the allocation & contract tables.
+            </div>
+          </div>
 
-      <div className="card" style={{ marginTop: 14 }}>
-        <strong>Weights</strong>
-        <table className="compact-table">
-          <thead>
-            <tr>
-              <th>Asset</th>
-              <th>Weight</th>
-              <th>Contracts</th>
-              <th>Margin/Contract</th>
-            </tr>
-          </thead>
-          <tbody>
-            {optimizerQuery.data?.weights.map((row) => (
-              <tr key={row.asset}>
-                <td>{row.asset}</td>
-                <td>{row.weight}</td>
-                <td>{row.contracts}</td>
-                <td>{`$${row.marginPerContract.toLocaleString()}`}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="text-muted small" style={{ marginTop: 8 }}>
-          Includes the Dash inverse-vol fallback (set contracts to zero to exclude) and mirrors the allocation & contract tables.
+          <div className="card" style={{ marginTop: 14 }}>
+            <strong>Suggested Contracts</strong>
+            <div className="flex gap-md" style={{ alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+              <label className="field-label" htmlFor="riskfolio-equity" style={{ margin: 0 }}>Account Equity</label>
+              <input id="riskfolio-equity" className="input" type="number" defaultValue={accountEquity} style={{ maxWidth: 200 }} />
+              <button type="button" className="button" disabled>
+                Apply Suggested Contracts
+              </button>
+            </div>
+            <div className="text-muted small" style={{ marginTop: 10 }}>
+              Columns: File, Symbol, Optimized Weight, Suggested Weight Gap, Current Weight Gap, Margin / Contract, Suggested Contracts,
+              Suggested Margin, Current Contracts, Current Margin, Delta.
+            </div>
+            <div className="table-wrapper" style={{ marginTop: 10 }}>
+              <table className="compact-table">
+                <thead>
+                  <tr>
+                    <th>File</th>
+                    <th>Symbol</th>
+                    <th>Optimized Weight</th>
+                    <th>Suggested Weight Gap</th>
+                    <th>Current Weight Gap</th>
+                    <th>Margin / Contract</th>
+                    <th>Suggested Contracts</th>
+                    <th>Suggested Margin</th>
+                    <th>Current Contracts</th>
+                    <th>Current Margin</th>
+                    <th>Delta</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Example.xlsx</td>
+                    <td>MNQ</td>
+                    <td>0.24</td>
+                    <td>+0.05</td>
+                    <td>-0.02</td>
+                    <td>$3,500</td>
+                    <td>3</td>
+                    <td>$10,500</td>
+                    <td>2</td>
+                    <td>$7,000</td>
+                    <td>+1</td>
+                  </tr>
+                  <tr>
+                    <td>Example2.xlsx</td>
+                    <td>MES</td>
+                    <td>0.18</td>
+                    <td>+0.03</td>
+                    <td>-0.01</td>
+                    <td>$2,800</td>
+                    <td>2</td>
+                    <td>$5,600</td>
+                    <td>1</td>
+                    <td>$2,800</td>
+                    <td>+1</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="grid-2" style={{ marginTop: 16 }}>
+            <div className="card">
+              <strong>Efficient Frontier</strong>
+              <div className="placeholder-text">Frontier chart placeholder</div>
+            </div>
+            <div className="card">
+              <strong>Risk Contribution (%)</strong>
+              <div className="placeholder-text">Risk contribution bar chart placeholder</div>
+            </div>
+            <div className="card">
+              <strong>Backtested Portfolio Equity</strong>
+              <div className="placeholder-text">Backtested equity chart placeholder</div>
+            </div>
+            <div className="card">
+              <strong>Asset Correlation</strong>
+              <div className="placeholder-text">Asset correlation heatmap placeholder</div>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="text-muted small">This optimisation method is coming soon. Switch to Mean-Risk to configure controls.</div>
         </div>
-      </div>
+      )}
     </div>
   );
 
