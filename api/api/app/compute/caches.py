@@ -17,6 +17,7 @@ class SeriesBundle:
     daily_returns: pl.DataFrame
     net_position: pl.DataFrame
     margin: pl.DataFrame
+    spikes: pl.DataFrame
 
 
 class PerFileCache:
@@ -67,6 +68,9 @@ class PerFileCache:
     def margin_usage(self, path: Path) -> pl.DataFrame:
         return self._get_or_build(path, "margin", self._compute_margin)
 
+    def spike_overlay(self, path: Path) -> pl.DataFrame:
+        return self._get_or_build(path, "spikes", self._compute_spikes)
+
     def bundle(self, path: Path) -> SeriesBundle:
         return SeriesBundle(
             equity=self.equity_curve(path),
@@ -74,6 +78,7 @@ class PerFileCache:
             daily_returns=self.daily_returns(path),
             net_position=self.net_position(path),
             margin=self.margin_usage(path),
+            spikes=self.spike_overlay(path),
         )
 
     # ---------- cache helpers ----------
@@ -252,6 +257,33 @@ class PerFileCache:
             pl.col("start").alias("timestamp"),
             pl.col("margin_used"),
         )
+
+    def _compute_spikes(self, loaded: LoadedTrades) -> pl.DataFrame:
+        trades = loaded.trades
+        if trades.is_empty():
+            return pl.DataFrame({"timestamp": [], "marker_value": [], "drawdown": [], "runup": [], "trade_no": []})
+
+        # Midpoint between entry/exit; marker value will be filled downstream relative to equity if needed.
+        markers = []
+        for row in trades.iter_rows(named=True):
+            entry = row.get("entry_time")
+            exit_ = row.get("exit_time")
+            if entry is None or exit_ is None:
+                continue
+            midpoint = entry + (exit_ - entry) / 2
+            drawdown = float(row.get("drawdown_trade", 0.0))
+            runup = float(row.get("runup", 0.0))
+            markers.append(
+                {
+                    "timestamp": midpoint,
+                    "drawdown": drawdown,
+                    "runup": runup,
+                    "trade_no": row.get("trade_no"),
+                    # marker_value can be computed at plotting time as equity_at_marker - drawdown
+                    "marker_value": None,
+                }
+            )
+        return pl.DataFrame(markers) if markers else pl.DataFrame({"timestamp": [], "marker_value": [], "drawdown": [], "runup": [], "trade_no": []})
 
     # ---------- interval builders ----------
     def _netpos_intervals(self, loaded: LoadedTrades) -> tuple[pl.DataFrame, pl.DataFrame]:
