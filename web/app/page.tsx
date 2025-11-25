@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import MetricsGrid from '../components/MetricsGrid';
 import SeriesChart from '../components/SeriesChart';
@@ -84,6 +84,21 @@ export default function HomePage() {
       },
     ],
   });
+
+  useEffect(() => {
+    const series = equityQuery.data ?? mockSeries(activeSelection, 'equity');
+    const timestamps = series.points?.map((p) => p.timestamp).filter(Boolean) ?? [];
+    if (!timestamps.length) return;
+    const sorted = [...timestamps].sort();
+    const rangeStart = sorted[0];
+    const rangeEnd = sorted[sorted.length - 1];
+    setActiveSelection((prev) => {
+      const nextStart = prev.start ?? rangeStart;
+      const nextEnd = prev.end ?? rangeEnd;
+      if (nextStart === prev.start && nextEnd === prev.end) return prev;
+      return { ...prev, start: nextStart, end: nextEnd };
+    });
+  }, [equityQuery.data, activeSelection.name]);
 
   const correlationQuery = useQuery({
     queryKey: ['correlations', activeSelection.name, activeSelection.files.join(','), corrMode],

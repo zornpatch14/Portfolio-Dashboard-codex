@@ -3,13 +3,6 @@
 import { useMemo } from 'react';
 import { Selection } from '../lib/selections';
 
-function normalizeList(value: string) {
-  return value
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
-
 type Props = {
   selection: Selection;
   availableFiles: string[];
@@ -23,9 +16,25 @@ export function SelectionControls({ selection, availableFiles, onChange }: Props
     onChange({ ...selection, files });
   };
 
-  const allSymbols = useMemo(() => normalizeList(selection.symbols.join(',')), [selection.symbols]);
-  const allIntervals = useMemo(() => normalizeList(selection.intervals.join(',')), [selection.intervals]);
-  const allStrategies = useMemo(() => normalizeList(selection.strategies.join(',')), [selection.strategies]);
+  const parsed = useMemo(() => {
+    const symbols = new Set<string>();
+    const intervals = new Set<string>();
+    const strategies = new Set<string>();
+    availableFiles.forEach((file) => {
+      const base = file.split('/').pop() || file;
+      const parts = base.replace(/\.[^.]+$/, '').split('_');
+      if (parts.length >= 4) {
+        symbols.add(parts[1]);
+        intervals.add(parts[2]);
+        strategies.add(parts.slice(3).join('_'));
+      }
+    });
+    return {
+      symbols: Array.from(symbols).sort(),
+      intervals: Array.from(intervals).sort((a, b) => Number(a) - Number(b)),
+      strategies: Array.from(strategies).sort(),
+    };
+  }, [availableFiles]);
 
   return (
     <div className="panel">
@@ -40,34 +49,85 @@ export function SelectionControls({ selection, availableFiles, onChange }: Props
 
       <div className="grid-2">
         <div>
-          <label className="field-label" htmlFor="symbols">Symbols (comma separated)</label>
-          <input
-            id="symbols"
-            className="input"
-            placeholder="e.g. MNQ, MES"
-            value={allSymbols.join(', ')}
-            onChange={(event) => onChange({ ...selection, symbols: normalizeList(event.target.value) })}
-          />
+          <label className="field-label">Symbols</label>
+          <div className="chips">
+            {parsed.symbols.length ? (
+              parsed.symbols.map((symbol) => {
+                const active = selection.symbols.includes(symbol);
+                return (
+                  <button
+                    key={symbol}
+                    type="button"
+                    className={`chip ${active ? 'chip-active' : ''}`}
+                    onClick={() => {
+                      const next = active
+                        ? selection.symbols.filter((s) => s !== symbol)
+                        : [...selection.symbols, symbol];
+                      onChange({ ...selection, symbols: next });
+                    }}
+                  >
+                    {symbol}
+                  </button>
+                );
+              })
+            ) : (
+              <div className="text-muted small">No symbols detected yet.</div>
+            )}
+          </div>
         </div>
         <div>
-          <label className="field-label" htmlFor="intervals">Intervals (comma separated)</label>
-          <input
-            id="intervals"
-            className="input"
-            placeholder="e.g. 15, 60"
-            value={allIntervals.join(', ')}
-            onChange={(event) => onChange({ ...selection, intervals: normalizeList(event.target.value) })}
-          />
+          <label className="field-label">Intervals</label>
+          <div className="chips">
+            {parsed.intervals.length ? (
+              parsed.intervals.map((interval) => {
+                const active = selection.intervals.includes(interval);
+                return (
+                  <button
+                    key={interval}
+                    type="button"
+                    className={`chip ${active ? 'chip-active' : ''}`}
+                    onClick={() => {
+                      const next = active
+                        ? selection.intervals.filter((i) => i !== interval)
+                        : [...selection.intervals, interval];
+                      onChange({ ...selection, intervals: next });
+                    }}
+                  >
+                    {interval}
+                  </button>
+                );
+              })
+            ) : (
+              <div className="text-muted small">No intervals detected yet.</div>
+            )}
+          </div>
         </div>
         <div>
-          <label className="field-label" htmlFor="strategies">Strategies (comma separated)</label>
-          <input
-            id="strategies"
-            className="input"
-            placeholder="All strategies"
-            value={allStrategies.join(', ')}
-            onChange={(event) => onChange({ ...selection, strategies: normalizeList(event.target.value) })}
-          />
+          <label className="field-label">Strategies</label>
+          <div className="chips">
+            {parsed.strategies.length ? (
+              parsed.strategies.map((strategy) => {
+                const active = selection.strategies.includes(strategy);
+                return (
+                  <button
+                    key={strategy}
+                    type="button"
+                    className={`chip ${active ? 'chip-active' : ''}`}
+                    onClick={() => {
+                      const next = active
+                        ? selection.strategies.filter((s) => s !== strategy)
+                        : [...selection.strategies, strategy];
+                      onChange({ ...selection, strategies: next });
+                    }}
+                  >
+                    {strategy}
+                  </button>
+                );
+              })
+            ) : (
+              <div className="text-muted small">No strategies detected yet.</div>
+            )}
+          </div>
         </div>
         <div className="flex gap-md" style={{ alignItems: 'flex-end' }}>
           <div style={{ flex: 1 }}>
