@@ -18,6 +18,7 @@ from api.app.compute.portfolio import PortfolioAggregator, PortfolioView
 from api.app.constants import get_contract_spec
 from api.app.ingest import IngestService, TradeFileMetadata
 from api.app.dependencies import selection_hash
+from api.app.services.cache import build_selection_key, get_cache_backend
 from api.app.schemas import (
     FileMetadata,
     FileUploadResponse,
@@ -80,6 +81,12 @@ class DataStore:
         self.cache = PerFileCache(storage_dir=root / ".cache")
         self.aggregator = PortfolioAggregator(self.cache)
         self._portfolio_cache: dict[str, PortfolioView] = {}
+        self._backend = get_cache_backend()
+        try:
+            ttl_env = os.getenv("PORTFOLIO_CACHE_TTL_SECONDS")
+            self._ttl_seconds = int(ttl_env) if ttl_env else 900
+        except ValueError:
+            self._ttl_seconds = 900
 
     # ---------------- ingest & metadata ----------------
     def ingest(self, files: Iterable[UploadFile]) -> FileUploadResponse:
@@ -195,15 +202,11 @@ class DataStore:
 
     def _view_for_selection(self, selection: Selection) -> PortfolioView:
         key = selection_hash(selection)
-        if key in self._portfolio_cache:
-            cached = self._portfolio_cache[key]
-            view = PortfolioView(
-                equity=cached.equity.clone(),
-                daily_returns=cached.daily_returns.clone(),
-                net_position=cached.net_position.clone(),
-                margin=cached.margin.clone(),
-                contributors=list(cached.contributors),
-            )
+        cache_key = build_selection_key(key, selection.data_version, "portfolio")
+
+        cached_view = self._load_portfolio_from_cache(cache_key)
+        if cached_view:
+            view = cached_view
         else:
             metas = self._metas_for_selection(selection)
             paths = [Path(m.trades_path) for m in metas]
@@ -215,14 +218,6 @@ class DataStore:
                 direction=selection.direction,
                 include_spikes=selection.spike_flag,
             )
-            self._portfolio_cache[key] = PortfolioView(
-                equity=built.equity.clone(),
-                daily_returns=built.daily_returns.clone(),
-                net_position=built.net_position.clone(),
-                margin=built.margin.clone(),
-                contributors=list(built.contributors),
-                spikes=built.spikes.clone() if built.spikes is not None else None,
-            )
             view = PortfolioView(
                 equity=built.equity.clone(),
                 daily_returns=built.daily_returns.clone(),
@@ -231,8 +226,73 @@ class DataStore:
                 contributors=list(built.contributors),
                 spikes=built.spikes.clone() if built.spikes is not None else None,
             )
+            self._portfolio_cache[key] = view
+            self._persist_portfolio_to_cache(cache_key, view)
 
         return self._filter_view_by_date(view, selection)
+
+    def _persist_portfolio_to_cache(self, cache_key: str, view: PortfolioView) -> None:
+        try:
+            payload = {
+                "equity": view.equity.write_parquet(),
+                "daily_returns": view.daily_returns.write_parquet(),
+                "net_position": view.net_position.write_parquet(),
+                "margin": view.margin.write_parquet(),
+                "contributors": [str(p) for p in view.contributors],
+                "spikes": view.spikes.write_parquet() if view.spikes is not None else None,
+            }
+            import json
+
+            # Parquet bytes are not JSON serializable; store as a dict of base64-encoded bytes.
+            import base64
+
+            encoded = {
+                "equity": base64.b64encode(payload["equity"]).decode(),
+                "daily_returns": base64.b64encode(payload["daily_returns"]).decode(),
+                "net_position": base64.b64encode(payload["net_position"]).decode(),
+                "margin": base64.b64encode(payload["margin"]).decode(),
+                "contributors": payload["contributors"],
+                "spikes": base64.b64encode(payload["spikes"]).decode() if payload["spikes"] is not None else None,
+            }
+            self._backend.set(cache_key, json.dumps(encoded).encode(), ttl_seconds=self._ttl_seconds)
+        except Exception:
+            logger.warning("Failed to persist portfolio cache for key %s", cache_key, exc_info=True)
+
+    def _load_portfolio_from_cache(self, cache_key: str) -> PortfolioView | None:
+        raw = self._backend.get(cache_key)
+        if raw is None:
+            return None
+        try:
+            import json
+            import base64
+
+            encoded = json.loads(raw.decode())
+
+            def decode_frame(b64val):
+                if b64val is None:
+                    return None
+                data = base64.b64decode(b64val)
+                return pl.read_parquet(data)
+
+            equity = decode_frame(encoded.get("equity"))
+            daily = decode_frame(encoded.get("daily_returns"))
+            netpos = decode_frame(encoded.get("net_position"))
+            margin = decode_frame(encoded.get("margin"))
+            spikes = decode_frame(encoded.get("spikes"))
+            contributors = [Path(p) for p in encoded.get("contributors", [])]
+            if equity is None or daily is None or netpos is None or margin is None:
+                return None
+            return PortfolioView(
+                equity=equity,
+                daily_returns=daily,
+                net_position=netpos,
+                margin=margin,
+                contributors=contributors,
+                spikes=spikes,
+            )
+        except Exception:
+            logger.warning("Failed to load portfolio cache for key %s", cache_key, exc_info=True)
+            return None
 
     def _filter_view_by_date(self, view: PortfolioView, selection: Selection) -> PortfolioView:
         start_dt = selection.start_date
