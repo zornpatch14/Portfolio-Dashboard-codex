@@ -58,42 +58,55 @@ class PerFileCache:
         return pl.DataFrame({"mtm_date": [], "mtm_net_profit": [], "mtm_session_start": [], "mtm_session_end": []})
 
     def equity_curve(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
-        if contract_multiplier is None and margin_override is None:
-            return self._get_or_build(path, "equity", lambda loaded: self._compute_equity(loaded, None, None))
-        loaded = self.load_trades(path)
-        return self._compute_equity(loaded, contract_multiplier, margin_override)
+        return self._get_or_build(
+            path,
+            "equity",
+            lambda loaded: self._compute_equity(loaded, contract_multiplier, margin_override),
+            contract_multiplier,
+            margin_override,
+        )
 
     def daily_returns(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
-        if contract_multiplier is None and margin_override is None:
-            return self._get_or_build(path, "daily_returns", lambda loaded: self._compute_daily_returns(loaded, None, None))
-        loaded = self.load_trades(path)
-        return self._compute_daily_returns(loaded, contract_multiplier, margin_override)
+        return self._get_or_build(
+            path,
+            "daily_returns",
+            lambda loaded: self._compute_daily_returns(loaded, contract_multiplier, margin_override),
+            contract_multiplier,
+            margin_override,
+        )
 
     def net_position(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
         """Return point-in-time net position series; cache intervals when no overrides applied."""
 
-        if contract_multiplier is None and margin_override is None:
-            intervals = self._get_or_build(path, "intervals", lambda loaded: self._netpos_intervals(loaded, None, None, None)[1])
-            return intervals.select(pl.col("start").alias("timestamp"), pl.col("net_position"))
-        loaded = self.load_trades(path)
-        intervals = self._netpos_intervals(loaded, contract_multiplier=contract_multiplier, margin_override=margin_override)[1]
+        intervals = self._get_or_build(
+            path,
+            "intervals",
+            lambda loaded: self._netpos_intervals(loaded, contract_multiplier, margin_override, None)[1],
+            contract_multiplier,
+            margin_override,
+        )
         return intervals.select(pl.col("start").alias("timestamp"), pl.col("net_position"))
 
     def margin_usage(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
         """Return margin usage intervals (timestamp=interval start) with caching when no overrides."""
 
-        if contract_multiplier is None and margin_override is None:
-            intervals = self._get_or_build(path, "intervals", lambda loaded: self._netpos_intervals(loaded, None, None, None)[1])
-        else:
-            loaded = self.load_trades(path)
-            intervals = self._netpos_intervals(loaded, contract_multiplier=contract_multiplier, margin_override=margin_override)[1]
+        intervals = self._get_or_build(
+            path,
+            "intervals",
+            lambda loaded: self._netpos_intervals(loaded, contract_multiplier, margin_override, None)[1],
+            contract_multiplier,
+            margin_override,
+        )
         return intervals.select(pl.col("start").alias("timestamp"), pl.col("margin_used"), pl.col("symbol"))
 
     def spike_overlay(self, path: Path, contract_multiplier: float | None = None) -> pl.DataFrame:
-        if contract_multiplier is None:
-            return self._get_or_build(path, "spikes", lambda loaded: self._compute_spikes(loaded, None))
-        loaded = self.load_trades(path)
-        return self._compute_spikes(loaded, contract_multiplier)
+        return self._get_or_build(
+            path,
+            "spikes",
+            lambda loaded: self._compute_spikes(loaded, contract_multiplier),
+            contract_multiplier,
+            None,
+        )
 
     def bundle(self, path: Path) -> SeriesBundle:
         return SeriesBundle(
@@ -105,13 +118,28 @@ class PerFileCache:
         )
 
     # ---------- cache helpers ----------
-    def _artifact_path(self, file_id: str, artifact: str) -> Path:
-        suffix = f"_{self.data_version}" if self.data_version else ""
-        return self.storage_dir / f"{file_id}{suffix}_{artifact}.parquet"
+    def _artifact_path(
+        self,
+        file_id: str,
+        artifact: str,
+        contract_multiplier: float | None = None,
+        margin_override: float | None = None,
+    ) -> Path:
+        version = f"_{self.data_version}" if self.data_version else ""
+        cm = f"cm{contract_multiplier}" if contract_multiplier is not None else "cm_default"
+        marg = f"m{margin_override}" if margin_override is not None else "m_default"
+        return self.storage_dir / f"{file_id}{version}_{cm}_{marg}_{artifact}.parquet"
 
-    def _get_or_build(self, path: Path, artifact: str, builder: Callable[[LoadedTrades], pl.DataFrame]) -> pl.DataFrame:
+    def _get_or_build(
+        self,
+        path: Path,
+        artifact: str,
+        builder: Callable[[LoadedTrades], pl.DataFrame],
+        contract_multiplier: float | None = None,
+        margin_override: float | None = None,
+    ) -> pl.DataFrame:
         loaded = self.load_trades(path)
-        target = self._artifact_path(loaded.file_id, artifact)
+        target = self._artifact_path(loaded.file_id, artifact, contract_multiplier, margin_override)
         if target.exists():
             return pl.read_parquet(target)
 

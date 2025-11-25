@@ -17,6 +17,7 @@ from api.app.compute.downsampling import downsample_timeseries
 from api.app.compute.portfolio import PortfolioAggregator, PortfolioView
 from api.app.constants import get_contract_spec
 from api.app.ingest import IngestService, TradeFileMetadata
+from api.app.dependencies import selection_hash
 from api.app.schemas import (
     FileMetadata,
     FileUploadResponse,
@@ -78,6 +79,7 @@ class DataStore:
         self.ingest_service = IngestService(storage_root=root)
         self.cache = PerFileCache(storage_dir=root / ".cache")
         self.aggregator = PortfolioAggregator(self.cache)
+        self._portfolio_cache: dict[str, PortfolioView] = {}
 
     # ---------------- ingest & metadata ----------------
     def ingest(self, files: Iterable[UploadFile]) -> FileUploadResponse:
@@ -192,14 +194,40 @@ class DataStore:
         return points
 
     def _view_for_selection(self, selection: Selection) -> PortfolioView:
-        metas = self._metas_for_selection(selection)
-        paths = [Path(m.trades_path) for m in metas]
-        view = self.aggregator.aggregate(
-            paths,
-            metas=metas,
-            contract_multipliers=selection.contract_multipliers,
-            margin_overrides=selection.margin_overrides,
-        )
+        key = selection_hash(selection)
+        if key in self._portfolio_cache:
+            cached = self._portfolio_cache[key]
+            view = PortfolioView(
+                equity=cached.equity.clone(),
+                daily_returns=cached.daily_returns.clone(),
+                net_position=cached.net_position.clone(),
+                margin=cached.margin.clone(),
+                contributors=list(cached.contributors),
+            )
+        else:
+            metas = self._metas_for_selection(selection)
+            paths = [Path(m.trades_path) for m in metas]
+            built = self.aggregator.aggregate(
+                paths,
+                metas=metas,
+                contract_multipliers=selection.contract_multipliers,
+                margin_overrides=selection.margin_overrides,
+            )
+            self._portfolio_cache[key] = PortfolioView(
+                equity=built.equity.clone(),
+                daily_returns=built.daily_returns.clone(),
+                net_position=built.net_position.clone(),
+                margin=built.margin.clone(),
+                contributors=list(built.contributors),
+            )
+            view = PortfolioView(
+                equity=built.equity.clone(),
+                daily_returns=built.daily_returns.clone(),
+                net_position=built.net_position.clone(),
+                margin=built.margin.clone(),
+                contributors=list(built.contributors),
+            )
+
         return self._filter_view_by_date(view, selection)
 
     def _filter_view_by_date(self, view: PortfolioView, selection: Selection) -> PortfolioView:
