@@ -132,6 +132,12 @@ class DataStore:
     def _paths_for_selection(self, selection: Selection) -> list[Path]:
         """Filter available files using selection filters and return Parquet paths."""
 
+        filtered = self._metas_for_selection(selection)
+        return [Path(m.trades_path) for m in filtered]
+
+    def _metas_for_selection(self, selection: Selection) -> list[TradeFileMetadata]:
+        """Filter available files using selection filters and return metadata."""
+
         all_meta = self.ingest_service.index.all()
         if selection.files:
             # explicit ids take precedence
@@ -167,7 +173,7 @@ class DataStore:
         if not filtered:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No files match selection filters")
 
-        return [Path(m.trades_path) for m in filtered]
+        return filtered
 
     def _to_points(self, rows, ts_key: str, value_key: str) -> list[SeriesPoint]:
         points: list[SeriesPoint] = []
@@ -182,8 +188,14 @@ class DataStore:
         return points
 
     def _view_for_selection(self, selection: Selection) -> PortfolioView:
-        paths = self._paths_for_selection(selection)
-        view = self.aggregator.aggregate(paths)
+        metas = self._metas_for_selection(selection)
+        paths = [Path(m.trades_path) for m in metas]
+        view = self.aggregator.aggregate(
+            paths,
+            metas=metas,
+            contract_multipliers=selection.contract_multipliers,
+            margin_overrides=selection.margin_overrides,
+        )
         return self._filter_view_by_date(view, selection)
 
     def _filter_view_by_date(self, view: PortfolioView, selection: Selection) -> PortfolioView:
@@ -274,14 +286,20 @@ class DataStore:
         return HistogramResponse(label="return_distribution", selection=selection, buckets=buckets)
 
     def metrics(self, selection: Selection) -> MetricsResponse:
-        paths = self._paths_for_selection(selection)
+        metas = self._metas_for_selection(selection)
+        paths = [Path(m.trades_path) for m in metas]
         rows: list[MetricsRow] = []
 
         # Per-file metrics
-        for path in paths:
-            equity = self.cache.equity_curve(path)
+        for meta in metas:
+            path = Path(meta.trades_path)
+            symbol = (meta.symbol or "").upper()
+            cmult = selection.contract_multipliers.get(symbol)
+            marg = selection.margin_overrides.get(symbol)
+
+            equity = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=marg)
             trades_df = self.cache.load_trades(path).trades
-            daily = self.cache.daily_returns(path)
+            daily = self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg)
 
             net_profit = float(equity["equity"][-1] - self.cache.starting_equity) if len(equity) else 0.0
             trades = len(trades_df)

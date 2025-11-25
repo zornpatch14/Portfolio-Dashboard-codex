@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 import polars as pl
 
 from api.app.compute.caches import PerFileCache
 from api.app.compute.downsampling import DownsampleResult, downsample_timeseries
+from api.app.ingest import TradeFileMetadata
 
 
 @dataclass
@@ -23,7 +24,13 @@ class PortfolioAggregator:
     def __init__(self, cache: PerFileCache) -> None:
         self.cache = cache
 
-    def aggregate(self, files: Iterable[Path]) -> PortfolioView:
+    def aggregate(
+        self,
+        files: Iterable[Path],
+        metas: Optional[Iterable[TradeFileMetadata]] = None,
+        contract_multipliers: Optional[dict[str, float]] = None,
+        margin_overrides: Optional[dict[str, float]] = None,
+    ) -> PortfolioView:
         files = list(files)
         if not files:
             empty = pl.DataFrame({"timestamp": [], "value": []})
@@ -35,7 +42,30 @@ class PortfolioAggregator:
                 contributors=[],
             )
 
-        daily_frames = [self.cache.daily_returns(path) for path in files]
+        meta_map = {m.file_id: m for m in metas} if metas else {}
+        contract_multipliers = contract_multipliers or {}
+        margin_overrides = margin_overrides or {}
+
+        def overrides_for(path: Path) -> tuple[float | None, float | None]:
+            file_id = path.stem
+            symbol = None
+            meta = meta_map.get(file_id)
+            if meta:
+                symbol = (meta.symbol or "").upper()
+            cmult = contract_multipliers.get(symbol, None)
+            margin = margin_overrides.get(symbol, None)
+            return cmult, margin
+
+        daily_frames = []
+        netpos_frames = []
+        margin_frames = []
+
+        for path in files:
+            cmult, marg = overrides_for(path)
+            daily_frames.append(self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg))
+            netpos_frames.append(self.cache.net_position(path, contract_multiplier=cmult, margin_override=marg))
+            margin_frames.append(self.cache.margin_usage(path, contract_multiplier=cmult, margin_override=marg))
+
         combined_daily = pl.concat(daily_frames).group_by("date").agg(
             pnl=pl.col("pnl").sum(),
             capital=pl.col("capital").sum(),
@@ -53,10 +83,7 @@ class PortfolioAggregator:
             (pl.col("pnl").cum_sum() + starting_equity).alias("equity"),
         )
 
-        netpos_frames = [self.cache.net_position(path) for path in files]
         netpos = _combine_timeseries(netpos_frames, "net_position")
-
-        margin_frames = [self.cache.margin_usage(path) for path in files]
         margin = _combine_timeseries(margin_frames, "margin_used")
 
         return PortfolioView(
