@@ -7,6 +7,7 @@ import SeriesChart from '../components/SeriesChart';
 import { HistogramChart } from '../components/HistogramChart';
 import { SelectionControls } from '../components/SelectionControls';
 import { CorrelationHeatmap } from '../components/CorrelationHeatmap';
+import { EquityMultiChart } from '../components/EquityMultiChart';
 import {
   fetchCorrelations,
   fetchCta,
@@ -99,6 +100,125 @@ export default function HomePage() {
       return { ...prev, start: nextStart, end: nextEnd };
     });
   }, [equityQuery.data, activeSelection.name]);
+
+  const deriveFileMeta = useMemo(() => {
+    return (file: string) => {
+      const base = file.split('/').pop() || file;
+      const parts = base.replace(/\.[^.]+$/, '').split('_');
+      return {
+        symbol: parts[1] || '',
+        interval: parts[2] || '',
+        strategy: parts.slice(3).join('_') || '',
+      };
+    };
+  }, []);
+
+  const equityLines = useMemo(() => {
+    const files = availableFiles.filter((file) => {
+      if (!activeSelection.files.includes(file)) return false;
+      const meta = deriveFileMeta(file);
+      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
+      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
+      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
+      const contracts = activeSelection.contracts[file] ?? 1;
+      if (contracts === 0) return false;
+      return true;
+    });
+
+    const startDate = activeSelection.start;
+    const endDate = activeSelection.end;
+
+    const perFile = files.map((file) => {
+      const contracts = activeSelection.contracts[file] ?? 1;
+      const mockSelection = { ...activeSelection, name: file, files: [file] };
+      const base = mockSeries(mockSelection, 'equity');
+      const filteredPoints = base.points.filter((p) => {
+        if (startDate && p.timestamp < startDate) return false;
+        if (endDate && p.timestamp > endDate) return false;
+        return true;
+      });
+      return {
+        name: file,
+        points: filteredPoints.map((p) => ({ ...p, value: p.value * contracts })),
+      };
+    });
+
+    const allTimestamps = Array.from(
+      new Set(perFile.flatMap((s) => s.points.map((p) => p.timestamp))),
+    ).sort();
+    const portfolioPoints = allTimestamps.map((ts) => {
+      const sum = perFile.reduce((acc, series) => {
+        const point = series.points.find((p) => p.timestamp === ts);
+        return acc + (point?.value ?? 0);
+      }, 0);
+      return { timestamp: ts, value: sum };
+    });
+
+    return { perFile, portfolio: portfolioPoints };
+  }, [availableFiles, activeSelection, deriveFileMeta]);
+
+  const equityPercentLines = useMemo(() => {
+    const files = availableFiles.filter((file) => {
+      if (!activeSelection.files.includes(file)) return false;
+      const meta = deriveFileMeta(file);
+      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
+      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
+      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
+      const contracts = activeSelection.contracts[file] ?? 1;
+      if (contracts === 0) return false;
+      return true;
+    });
+
+    const startDate = activeSelection.start;
+    const endDate = activeSelection.end;
+
+    const perFile = files.map((file) => {
+      const mockSelection = { ...activeSelection, name: file, files: [file] };
+      const base = mockSeries(mockSelection, 'equityPercent');
+      const filteredPoints = base.points.filter((p) => {
+        if (startDate && p.timestamp < startDate) return false;
+        if (endDate && p.timestamp > endDate) return false;
+        return true;
+      });
+      return {
+        name: file,
+        points: filteredPoints,
+      };
+    });
+
+    const allTimestamps = Array.from(
+      new Set(perFile.flatMap((s) => s.points.map((p) => p.timestamp))),
+    ).sort();
+    const portfolioPoints = allTimestamps.map((ts) => {
+      const sum = perFile.reduce((acc, series) => {
+        const point = series.points.find((p) => p.timestamp === ts);
+        return acc + (point?.value ?? 0);
+      }, 0);
+      return { timestamp: ts, value: sum };
+    });
+
+    return { perFile, portfolio: portfolioPoints };
+  }, [availableFiles, activeSelection, deriveFileMeta]);
+
+  const [plotEnabled, setPlotEnabled] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const names = new Set<string>();
+    equityLines.perFile.forEach((s) => names.add(s.name));
+    equityPercentLines.perFile.forEach((s) => names.add(s.name));
+    names.add('Portfolio');
+    setPlotEnabled((prev) => {
+      const next = { ...prev };
+      names.forEach((name) => {
+        if (next[name] === undefined) next[name] = true;
+      });
+      // drop removed names
+      Object.keys(next).forEach((key) => {
+        if (!names.has(key)) delete next[key];
+      });
+      return next;
+    });
+  }, [equityLines.perFile, equityPercentLines.perFile]);
 
   const correlationQuery = useQuery({
     queryKey: ['correlations', activeSelection.name, activeSelection.files.join(','), corrMode],
@@ -261,8 +381,43 @@ export default function HomePage() {
         <h3 className="section-title" style={{ margin: 0 }}>Equity Curves</h3>
         {activeBadge}
       </div>
+      <div className="text-muted small" style={{ marginTop: 6 }}>
+        Equity curves honor filters (symbols/intervals/strategies), contract multipliers, and date range. Setting contracts to zero or toggling off filters will exclude that file from the chart and portfolio line.
+      </div>
       <div className="card" style={{ marginTop: 12 }}>
-        <div className="placeholder-text">Equity curves view coming soon.</div>
+        <strong>Plot lines</strong>
+        <div className="chips" style={{ marginTop: 10, flexWrap: 'wrap' }}>
+          {[...equityLines.perFile.map((s) => s.name), 'Portfolio'].map((name) => {
+            const active = plotEnabled[name] ?? true;
+            return (
+              <button
+                key={name}
+                type="button"
+                className={`chip ${active ? 'chip-active' : ''}`}
+                onClick={() => setPlotEnabled((prev) => ({ ...prev, [name]: !active }))}
+              >
+                {name}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12, display: 'grid', gap: 12 }}>
+        <EquityMultiChart
+          title="Equity Curve ($)"
+          series={[
+            ...equityLines.perFile.filter((s) => plotEnabled[s.name] !== false),
+            ...(plotEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: equityLines.portfolio }]),
+          ]}
+        />
+        <EquityMultiChart
+          title="Equity Curve (%)"
+          series={[
+            ...equityPercentLines.perFile.filter((s) => plotEnabled[s.name] !== false),
+            ...(plotEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: equityPercentLines.portfolio }]),
+          ]}
+        />
       </div>
     </div>
   );
