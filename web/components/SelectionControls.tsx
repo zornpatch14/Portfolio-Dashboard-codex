@@ -142,7 +142,7 @@ export function SelectionControls({ selection, availableFiles, onChange }: Props
                 );
               })}
             </div>
-            <div className="text-muted small" style={{ marginTop: 8 }}>Match the Dash “Included files” + contracts grid.</div>
+            <div className="text-muted small" style={{ marginTop: 8 }}>Match the Dash "Included files" + contracts grid.</div>
           </div>
 
           <div className="card" style={{ marginTop: 6 }}>
