@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -72,7 +73,7 @@ class PerFileCache:
         """Return point-in-time net position series; cache intervals when no overrides applied."""
 
         if contract_multiplier is None and margin_override is None:
-            intervals = self._get_or_build(path, "intervals", lambda loaded: self._netpos_intervals(loaded, None, None)[1])
+            intervals = self._get_or_build(path, "intervals", lambda loaded: self._netpos_intervals(loaded, None, None, None)[1])
             return intervals.select(pl.col("start").alias("timestamp"), pl.col("net_position"))
         loaded = self.load_trades(path)
         intervals = self._netpos_intervals(loaded, contract_multiplier=contract_multiplier, margin_override=margin_override)[1]
@@ -82,7 +83,7 @@ class PerFileCache:
         """Return margin usage intervals (timestamp=interval start) with caching when no overrides."""
 
         if contract_multiplier is None and margin_override is None:
-            intervals = self._get_or_build(path, "intervals", lambda loaded: self._netpos_intervals(loaded, None, None)[1])
+            intervals = self._get_or_build(path, "intervals", lambda loaded: self._netpos_intervals(loaded, None, None, None)[1])
         else:
             loaded = self.load_trades(path)
             intervals = self._netpos_intervals(loaded, contract_multiplier=contract_multiplier, margin_override=margin_override)[1]
@@ -218,7 +219,14 @@ class PerFileCache:
         # Use MTM sessions when available.
         if not mtm_df.is_empty():
             mtm_df = mtm_df.sort("mtm_date")
-            _, intervals = self._netpos_intervals(loaded, contract_multiplier=contract_multiplier, margin_override=margin_override, trades_override=trades)
+            last_session_end = mtm_df["mtm_session_end"].max() if "mtm_session_end" in mtm_df.columns else None
+            _, intervals = self._netpos_intervals(
+                loaded,
+                contract_multiplier=contract_multiplier,
+                margin_override=margin_override,
+                end_override=last_session_end,
+                trades_override=trades,
+            )
             rows = []
             for row in mtm_df.iter_rows(named=True):
                 session_start = row.get("mtm_session_start") or row["mtm_date"]
@@ -330,6 +338,7 @@ class PerFileCache:
         loaded: LoadedTrades,
         contract_multiplier: float | None = None,
         margin_override: float | None = None,
+        end_override: datetime | None = None,
         trades_override: pl.DataFrame | None = None,
     ) -> tuple[pl.DataFrame, pl.DataFrame]:
         """Build per-file net position and margin intervals.
@@ -378,7 +387,17 @@ class PerFileCache:
         points_df = pl.DataFrame({"timestamp": pl.Series(timestamps), "net_position": cumulative})
 
         starts = list(timestamps)
-        ends = list(timestamps[1:]) + [timestamps[-1]]
+
+        cutoff = end_override
+        if cutoff is None:
+            mtm_df = self.load_mtm(loaded.path, loaded.file_id)
+            if not mtm_df.is_empty() and "mtm_session_end" in mtm_df.columns:
+                cutoff = mtm_df["mtm_session_end"].max()
+        last_ts = timestamps[-1]
+        if cutoff is None or cutoff <= last_ts:
+            cutoff = last_ts + timedelta(minutes=1)
+
+        ends = list(timestamps[1:]) + [cutoff]
         netpos_values = list(cumulative)
         symbol_values = list(symbols)
 
