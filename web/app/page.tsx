@@ -50,6 +50,7 @@ export default function HomePage() {
   const [exportFormat, setExportFormat] = useState<'csv' | 'parquet'>('parquet');
   const [plotEnabled, setPlotEnabled] = useState<Record<string, boolean>>({});
   const [plotDrawdownEnabled, setPlotDrawdownEnabled] = useState<Record<string, boolean>>({});
+  const [plotMarginEnabled, setPlotMarginEnabled] = useState<Record<string, boolean>>({});
   const apiBase = process.env.NEXT_PUBLIC_API_BASE;
 
   const availableFiles = useMemo(
@@ -289,6 +290,152 @@ export default function HomePage() {
       return next;
     });
   }, [drawdownLines.perFile]);
+
+  const marginLines = useMemo(() => {
+    const files = availableFiles.filter((file) => {
+      if (!activeSelection.files.includes(file)) return false;
+      const meta = deriveFileMeta(file);
+      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
+      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
+      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
+      const contracts = activeSelection.contracts[file] ?? 1;
+      if (contracts === 0) return false;
+      return true;
+    });
+
+    const startDate = activeSelection.start;
+    const endDate = activeSelection.end;
+
+    const perFile = files.map((file) => {
+      const contracts = activeSelection.contracts[file] ?? 1;
+      const mockSelection = { ...activeSelection, name: file, files: [file] };
+      const base = mockSeries(mockSelection, 'margin');
+      const filteredPoints = base.points.filter((p) => {
+        if (startDate && p.timestamp < startDate) return false;
+        if (endDate && p.timestamp > endDate) return false;
+        return true;
+      });
+      return {
+        name: file,
+        points: filteredPoints.map((p) => ({ ...p, value: p.value * contracts })),
+      };
+    });
+
+    const allTimestamps = Array.from(
+      new Set(perFile.flatMap((s) => s.points.map((p) => p.timestamp))),
+    ).sort();
+    const portfolioPoints = allTimestamps.map((ts) => {
+      const sum = perFile.reduce((acc, series) => {
+        const point = series.points.find((p) => p.timestamp === ts);
+        return acc + (point?.value ?? 0);
+      }, 0);
+      return { timestamp: ts, value: sum };
+    });
+
+    return { perFile, portfolio: portfolioPoints };
+  }, [availableFiles, activeSelection, deriveFileMeta]);
+
+  const netposLines = useMemo(() => {
+    const files = availableFiles.filter((file) => {
+      if (!activeSelection.files.includes(file)) return false;
+      const meta = deriveFileMeta(file);
+      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
+      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
+      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
+      const contracts = activeSelection.contracts[file] ?? 1;
+      if (contracts === 0) return false;
+      return true;
+    });
+
+    const startDate = activeSelection.start;
+    const endDate = activeSelection.end;
+
+    const perFile = files.map((file) => {
+      const mockSelection = { ...activeSelection, name: file, files: [file] };
+      const base = mockSeries(mockSelection, 'netpos');
+      const filteredPoints = base.points.filter((p) => {
+        if (startDate && p.timestamp < startDate) return false;
+        if (endDate && p.timestamp > endDate) return false;
+        return true;
+      });
+      return {
+        name: file,
+        points: filteredPoints.map((p) => ({ ...p, value: p.value })),
+      };
+    });
+
+    const allTimestamps = Array.from(
+      new Set(perFile.flatMap((s) => s.points.map((p) => p.timestamp))),
+    ).sort();
+    const portfolioPoints = allTimestamps.map((ts) => {
+      const sum = perFile.reduce((acc, series) => {
+        const point = series.points.find((p) => p.timestamp === ts);
+        return acc + (point?.value ?? 0);
+      }, 0);
+      return { timestamp: ts, value: sum };
+    });
+
+    return { perFile, portfolio: portfolioPoints };
+  }, [availableFiles, activeSelection, deriveFileMeta]);
+
+  const purchasingPowerLines = useMemo(() => {
+    const timeline = Array.from(
+      new Set([
+        ...equityLines.portfolio.map((p) => p.timestamp),
+        ...marginLines.portfolio.map((p) => p.timestamp),
+      ]),
+    ).sort();
+
+    const perFile = equityLines.perFile.map((eq) => {
+      const margin = marginLines.perFile.find((m) => m.name === eq.name);
+      const points = timeline.map((ts) => {
+        const equityVal = eq.points.find((p) => p.timestamp === ts)?.value ?? 0;
+        const marginVal = margin?.points.find((p) => p.timestamp === ts)?.value ?? 0;
+        const value = accountEquity + equityVal - marginVal;
+        return { timestamp: ts, value };
+      });
+      return { name: eq.name, points };
+    });
+
+    const portfolioPoints = timeline.map((ts) => {
+      const equityVal = equityLines.portfolio.find((p) => p.timestamp === ts)?.value ?? 0;
+      const marginVal = marginLines.portfolio.find((p) => p.timestamp === ts)?.value ?? 0;
+      return { timestamp: ts, value: accountEquity + equityVal - marginVal };
+    });
+
+    return { perFile, portfolio: portfolioPoints };
+  }, [equityLines, marginLines, accountEquity]);
+
+  const purchasingPowerDrawdownLines = useMemo(() => {
+    const toDrawdown = (points: { timestamp: string; value: number }[]) => {
+      let maxSoFar = Number.NEGATIVE_INFINITY;
+      return points.map((p) => {
+        maxSoFar = Math.max(maxSoFar, p.value);
+        const dd = maxSoFar === 0 ? 0 : ((p.value - maxSoFar) / maxSoFar) * 100;
+        return { ...p, value: dd };
+      });
+    };
+    return {
+      perFile: purchasingPowerLines.perFile.map((s) => ({ name: s.name, points: toDrawdown(s.points) })),
+      portfolio: toDrawdown(purchasingPowerLines.portfolio),
+    };
+  }, [purchasingPowerLines]);
+
+  useEffect(() => {
+    const names = new Set<string>();
+    purchasingPowerLines.perFile.forEach((s) => names.add(s.name));
+    names.add('Portfolio');
+    setPlotMarginEnabled((prev) => {
+      const next = { ...prev };
+      names.forEach((name) => {
+        if (next[name] === undefined) next[name] = true;
+      });
+      Object.keys(next).forEach((key) => {
+        if (!names.has(key)) delete next[key];
+      });
+      return next;
+    });
+  }, [purchasingPowerLines.perFile]);
 
   const correlationQuery = useQuery({
     queryKey: ['correlations', activeSelection.name, activeSelection.files.join(','), corrMode],
@@ -853,11 +1000,62 @@ export default function HomePage() {
         <h3 className="section-title" style={{ margin: 0 }}>Margin</h3>
         {activeBadge}
       </div>
+      <div className="text-muted small" style={{ marginTop: 6 }}>
+        Margin views honor filters (symbols/intervals/strategies), contract multipliers, and date range. Setting contracts to zero or toggling off filters will exclude that file from the chart and portfolio line.
+      </div>
+
       <div className="card" style={{ marginTop: 12 }}>
-        <SeriesChart title="Margin Usage" series={marginQuery.data ?? mockSeries(activeSelection, 'margin')} color="#54ffd0" />
-        <div className="text-muted small">
-          Points: {marginQuery.data?.downsampledCount ?? marginQuery.data?.points.length ?? 0}
+        <strong>Plot lines</strong>
+        <div className="chips" style={{ marginTop: 10, flexWrap: 'wrap' }}>
+          {[...purchasingPowerLines.perFile.map((s) => s.name), 'Portfolio'].map((name) => {
+            const active = plotMarginEnabled[name] ?? true;
+            return (
+              <button
+                key={name}
+                type="button"
+                className={`chip ${active ? 'chip-active' : ''}`}
+                onClick={() => setPlotMarginEnabled((prev) => ({ ...prev, [name]: !active }))}
+              >
+                {name}
+              </button>
+            );
+          })}
         </div>
+      </div>
+
+      <div style={{ marginTop: 12, display: 'grid', gap: 12 }}>
+        <EquityMultiChart
+          title="Purchasing Power ($)"
+          description="Purchasing Power = Starting Balance + Portfolio P&L - Initial Margin Used"
+          series={[
+            ...purchasingPowerLines.perFile.filter((s) => plotMarginEnabled[s.name] !== false),
+            ...(plotMarginEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: purchasingPowerLines.portfolio }]),
+          ]}
+        />
+        <EquityMultiChart
+          title="Purchasing Power Drawdown (%)"
+          description="Purchasing Power Drawdown (percentage from peak)"
+          series={[
+            ...purchasingPowerDrawdownLines.perFile.filter((s) => plotMarginEnabled[s.name] !== false),
+            ...(plotMarginEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: purchasingPowerDrawdownLines.portfolio }]),
+          ]}
+        />
+        <EquityMultiChart
+          title="Initial Margin Used ($)"
+          description="Initial Margin Used = |net_sym| x IM(sym)"
+          series={[
+            ...marginLines.perFile.filter((s) => plotMarginEnabled[s.name] !== false),
+            ...(plotMarginEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: marginLines.portfolio }]),
+          ]}
+        />
+        <EquityMultiChart
+          title="Net Contracts"
+          description="Net contracts over time (per file and portfolio)"
+          series={[
+            ...netposLines.perFile.filter((s) => plotMarginEnabled[s.name] !== false),
+            ...(plotMarginEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: netposLines.portfolio }]),
+          ]}
+        />
       </div>
     </div>
   );

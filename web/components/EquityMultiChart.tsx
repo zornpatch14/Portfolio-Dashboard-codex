@@ -12,12 +12,13 @@ type SeriesLine = {
 type Props = {
   title: string;
   series: SeriesLine[];
+  description?: string;
   height?: number;
 };
 
 const palette = ['#4cc3ff', '#8fe3c7', '#ff8f6b', '#9f8bff', '#f4c95d', '#54ffd0', '#ffcb6b', '#6bdcff'];
 
-export function EquityMultiChart({ title, series, height = 380 }: Props) {
+export function EquityMultiChart({ title, series, description, height = 380 }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -71,6 +72,11 @@ export function EquityMultiChart({ title, series, height = 380 }: Props) {
       <div className="flex" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
         <strong>{title}</strong>
       </div>
+      {description ? (
+        <div className="text-muted small" style={{ marginTop: 4 }}>
+          {description}
+        </div>
+      ) : null}
       <div ref={ref} style={{ width: '100%', height }} />
     </div>
   );
