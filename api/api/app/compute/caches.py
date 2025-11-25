@@ -33,6 +33,7 @@ class PerFileCache:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.starting_equity = starting_equity
         self.margin_per_contract = margin_per_contract
+        self.default_contract_multiplier = 1.0
 
     # ---------- public API ----------
     def load_trades(self, path: Path) -> LoadedTrades:
@@ -75,6 +76,37 @@ class PerFileCache:
         df = builder(loaded)
         df.write_parquet(target)
         return df
+
+    # ---------- scaling helpers ----------
+    @staticmethod
+    def _apply_contract_multiplier(trades: pl.DataFrame, multiplier: float) -> pl.DataFrame:
+        """Scale contracts and P&L-related fields by a contract multiplier.
+
+        Keeps raw trades intact when multiplier==1. Intended to be applied at compute time
+        (not persisted) so overrides don't poison cached artifacts.
+        """
+
+        if multiplier == 1 or multiplier == 1.0:
+            return trades
+
+        factor = float(multiplier)
+        cols_to_scale = {
+            "contracts": "contracts",
+            "net_profit": "net_profit",
+            "runup": "runup",
+            "drawdown_trade": "drawdown_trade",
+            "commission": "commission",
+            "slippage": "slippage",
+            "gross_profit": "gross_profit",
+            "net_profit_raw": "net_profit_raw",
+        }
+        updates = []
+        for col, alias in cols_to_scale.items():
+            if col in trades.columns:
+                updates.append((pl.col(col) * factor).alias(alias))
+        if not updates:
+            return trades
+        return trades.with_columns(*updates)
 
     # ---------- computations ----------
     def _compute_equity(self, loaded: LoadedTrades) -> pl.DataFrame:
