@@ -48,6 +48,8 @@ export default function HomePage() {
   const [accountEquity, setAccountEquity] = useState(50000);
   const [includeDownsample, setIncludeDownsample] = useState(true);
   const [exportFormat, setExportFormat] = useState<'csv' | 'parquet'>('parquet');
+  const [plotEnabled, setPlotEnabled] = useState<Record<string, boolean>>({});
+  const [plotDrawdownEnabled, setPlotDrawdownEnabled] = useState<Record<string, boolean>>({});
   const apiBase = process.env.NEXT_PUBLIC_API_BASE;
 
   const availableFiles = useMemo(
@@ -200,8 +202,6 @@ export default function HomePage() {
     return { perFile, portfolio: portfolioPoints };
   }, [availableFiles, activeSelection, deriveFileMeta]);
 
-  const [plotEnabled, setPlotEnabled] = useState<Record<string, boolean>>({});
-
   useEffect(() => {
     const names = new Set<string>();
     equityLines.perFile.forEach((s) => names.add(s.name));
@@ -212,13 +212,83 @@ export default function HomePage() {
       names.forEach((name) => {
         if (next[name] === undefined) next[name] = true;
       });
-      // drop removed names
       Object.keys(next).forEach((key) => {
         if (!names.has(key)) delete next[key];
       });
       return next;
     });
   }, [equityLines.perFile, equityPercentLines.perFile]);
+
+  const drawdownLines = useMemo(() => {
+    const files = availableFiles.filter((file) => {
+      if (!activeSelection.files.includes(file)) return false;
+      const meta = deriveFileMeta(file);
+      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
+      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
+      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
+      const contracts = activeSelection.contracts[file] ?? 1;
+      if (contracts === 0) return false;
+      return true;
+    });
+
+    const startDate = activeSelection.start;
+    const endDate = activeSelection.end;
+
+    const perFile = files.map((file) => {
+      const contracts = activeSelection.contracts[file] ?? 1;
+      const mockSelection = { ...activeSelection, name: file, files: [file] };
+      const base = mockSeries(mockSelection, 'drawdown');
+      const filteredPoints = base.points.filter((p) => {
+        if (startDate && p.timestamp < startDate) return false;
+        if (endDate && p.timestamp > endDate) return false;
+        return true;
+      });
+      return {
+        name: file,
+        points: filteredPoints.map((p) => ({ ...p, value: p.value * contracts })),
+      };
+    });
+
+    const allTimestamps = Array.from(
+      new Set(perFile.flatMap((s) => s.points.map((p) => p.timestamp))),
+    ).sort();
+    const portfolioPoints = allTimestamps.map((ts) => {
+      const sum = perFile.reduce((acc, series) => {
+        const point = series.points.find((p) => p.timestamp === ts);
+        return acc + (point?.value ?? 0);
+      }, 0);
+      return { timestamp: ts, value: sum };
+    });
+
+    return { perFile, portfolio: portfolioPoints };
+  }, [availableFiles, activeSelection, deriveFileMeta]);
+
+  const drawdownPercentLines = useMemo(() => {
+    const equityBase = accountEquity || 1;
+    return {
+      perFile: drawdownLines.perFile.map((s) => ({
+        name: s.name,
+        points: s.points.map((p) => ({ ...p, value: (p.value / equityBase) * 100 })),
+      })),
+      portfolio: drawdownLines.portfolio.map((p) => ({ ...p, value: (p.value / equityBase) * 100 })),
+    };
+  }, [drawdownLines, accountEquity]);
+
+  useEffect(() => {
+    const names = new Set<string>();
+    drawdownLines.perFile.forEach((s) => names.add(s.name));
+    names.add('Portfolio');
+    setPlotDrawdownEnabled((prev) => {
+      const next = { ...prev };
+      names.forEach((name) => {
+        if (next[name] === undefined) next[name] = true;
+      });
+      Object.keys(next).forEach((key) => {
+        if (!names.has(key)) delete next[key];
+      });
+      return next;
+    });
+  }, [drawdownLines.perFile]);
 
   const correlationQuery = useQuery({
     queryKey: ['correlations', activeSelection.name, activeSelection.files.join(','), corrMode],
@@ -721,14 +791,39 @@ export default function HomePage() {
         {activeBadge}
       </div>
       <div className="card" style={{ marginTop: 12 }}>
-        <SeriesChart
-          title="Portfolio Drawdown"
-          series={drawdownQuery.data ?? mockSeries(activeSelection, 'drawdown')}
-          color="#ff8f6b"
-        />
-        <div className="text-muted small">
-          Points: {drawdownQuery.data?.downsampledCount ?? drawdownQuery.data?.points.length ?? 0}
+        <strong>Plot lines</strong>
+        <div className="chips" style={{ marginTop: 10, flexWrap: 'wrap' }}>
+          {[...drawdownLines.perFile.map((s) => s.name), 'Portfolio'].map((name) => {
+            const active = plotDrawdownEnabled[name] ?? true;
+            return (
+              <button
+                key={name}
+                type="button"
+                className={`chip ${active ? 'chip-active' : ''}`}
+                onClick={() => setPlotDrawdownEnabled((prev) => ({ ...prev, [name]: !active }))}
+              >
+                {name}
+              </button>
+            );
+          })}
         </div>
+      </div>
+
+      <div style={{ marginTop: 12, display: 'grid', gap: 12 }}>
+        <EquityMultiChart
+          title="Portfolio Drawdown ($)"
+          series={[
+            ...drawdownLines.perFile.filter((s) => plotDrawdownEnabled[s.name] !== false),
+            ...(plotDrawdownEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: drawdownLines.portfolio }]),
+          ]}
+        />
+        <EquityMultiChart
+          title="Portfolio Drawdown (%)"
+          series={[
+            ...drawdownPercentLines.perFile.filter((s) => plotDrawdownEnabled[s.name] !== false),
+            ...(plotDrawdownEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: drawdownPercentLines.portfolio }]),
+          ]}
+        />
       </div>
     </div>
   );
