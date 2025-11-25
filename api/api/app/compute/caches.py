@@ -28,13 +28,16 @@ class PerFileCache:
         storage_dir: Path | str | None = None,
         starting_equity: float = 100_000.0,
         margin_per_contract: float | None = None,
+        contract_multiplier: float = 1.0,
+        data_version: str | None = None,
     ) -> None:
         base_dir = Path(storage_dir) if storage_dir else Path(os.getenv("API_CACHE_DIR", ".cache"))
         self.storage_dir = base_dir / "per_file"
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.starting_equity = starting_equity
         self.margin_per_contract = margin_per_contract
-        self.default_contract_multiplier = 1.0
+        self.default_contract_multiplier = contract_multiplier
+        self.data_version = data_version
 
     # ---------- public API ----------
     def load_trades(self, path: Path) -> LoadedTrades:
@@ -83,7 +86,8 @@ class PerFileCache:
 
     # ---------- cache helpers ----------
     def _artifact_path(self, file_id: str, artifact: str) -> Path:
-        return self.storage_dir / f"{file_id}_{artifact}.parquet"
+        suffix = f"_{self.data_version}" if self.data_version else ""
+        return self.storage_dir / f"{file_id}{suffix}_{artifact}.parquet"
 
     def _get_or_build(self, path: Path, artifact: str, builder: Callable[[LoadedTrades], pl.DataFrame]) -> pl.DataFrame:
         loaded = self.load_trades(path)
@@ -127,7 +131,9 @@ class PerFileCache:
         return trades.with_columns(*updates)
 
     # ---------- computations ----------
-    def _compute_equity(self, loaded: LoadedTrades) -> pl.DataFrame:
+    def _compute_equity(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
+        cmult = contract_multiplier if contract_multiplier is not None else self.default_contract_multiplier
+        trades = self._apply_contract_multiplier(loaded.trades, cmult)
         # Try MTM-driven equity first
         mtm_df = self.load_mtm(loaded.path, loaded.file_id)
         if not mtm_df.is_empty():
@@ -145,7 +151,7 @@ class PerFileCache:
             equity_df = pl.DataFrame(equity_points).sort("timestamp")
 
             # Optional snap to trade exits: align cumulative trade P&L on exit sessions.
-            trades = loaded.trades.sort(["exit_time", "entry_time", "trade_no"])
+            trades = trades.sort(["exit_time", "entry_time", "trade_no"])
             if not trades.is_empty():
                 cum_trade = trades["net_profit"].cum_sum()
                 trades = trades.with_columns(cum_trade.alias("cum_trade_pl"))
@@ -180,7 +186,7 @@ class PerFileCache:
             return equity_df
 
         # Fallback: trade-based equity
-        trades = loaded.trades.sort(["exit_time", "entry_time", "trade_no"])
+        trades = trades.sort(["exit_time", "entry_time", "trade_no"])
         cumulative = trades["net_profit"].cum_sum()
         equity = cumulative + self.starting_equity
         return pl.DataFrame({"timestamp": trades["exit_time"], "equity": equity})
@@ -190,13 +196,15 @@ class PerFileCache:
         percent = equity_df["equity"] / self.starting_equity * 100
         return pl.DataFrame({"timestamp": equity_df["timestamp"], "percent_equity": percent})
 
-    def _compute_daily_returns(self, loaded: LoadedTrades) -> pl.DataFrame:
+    def _compute_daily_returns(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
+        cmult = contract_multiplier if contract_multiplier is not None else self.default_contract_multiplier
+        trades = self._apply_contract_multiplier(loaded.trades, cmult)
         mtm_df = self.load_mtm(loaded.path, loaded.file_id)
 
         # Use MTM sessions when available.
         if not mtm_df.is_empty():
             mtm_df = mtm_df.sort("mtm_date")
-            _, intervals = self._netpos_intervals(loaded)
+            _, intervals = self._netpos_intervals(loaded, margin_override=margin_override, trades_override=trades)
             rows = []
             for row in mtm_df.iter_rows(named=True):
                 session_start = row.get("mtm_session_start") or row["mtm_date"]
@@ -238,8 +246,8 @@ class PerFileCache:
             return pl.DataFrame(rows) if rows else pl.DataFrame({"date": [], "pnl": [], "capital": [], "daily_return": []})
 
         # Fallback: group by exit date if MTM absent.
-        trades = loaded.trades.with_columns(pl.col("exit_time").dt.date().alias("date"))
-        margin_value = self.margin_per_contract or float(trades["margin_per_contract"].max())
+        trades = trades.with_columns(pl.col("exit_time").dt.date().alias("date"))
+        margin_value = margin_override or self.margin_per_contract or float(trades["margin_per_contract"].max())
         grouped = trades.group_by("date").agg(
             pnl=pl.col("net_profit").sum(),
             contracts=pl.col("contracts").sum(),
@@ -286,7 +294,12 @@ class PerFileCache:
         return pl.DataFrame(markers) if markers else pl.DataFrame({"timestamp": [], "marker_value": [], "drawdown": [], "runup": [], "trade_no": []})
 
     # ---------- interval builders ----------
-    def _netpos_intervals(self, loaded: LoadedTrades) -> tuple[pl.DataFrame, pl.DataFrame]:
+    def _netpos_intervals(
+        self,
+        loaded: LoadedTrades,
+        margin_override: float | None = None,
+        trades_override: pl.DataFrame | None = None,
+    ) -> tuple[pl.DataFrame, pl.DataFrame]:
         """Build per-file net position and margin intervals.
 
         Returns:
@@ -294,7 +307,7 @@ class PerFileCache:
             intervals_df: piecewise-constant intervals with start/end, symbol, net_position, margin_used
         """
 
-        trades = loaded.trades
+        trades = trades_override if trades_override is not None else loaded.trades
         if trades.is_empty():
             empty_points = pl.DataFrame({"timestamp": [], "net_position": []})
             empty_intervals = pl.DataFrame({"start": [], "end": [], "symbol": [], "net_position": [], "margin_used": []})
@@ -328,7 +341,7 @@ class PerFileCache:
         sym = symbols[-1] if symbols else None
 
         # Margin per contract: prefer override; else from trades; else 0.
-        margin_value = self.margin_per_contract or float(trades["margin_per_contract"].max())
+        margin_value = margin_override or self.margin_per_contract or float(trades["margin_per_contract"].max())
         interval_df = pl.DataFrame(
             {
                 "start": starts,
