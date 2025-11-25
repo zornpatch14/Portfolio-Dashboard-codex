@@ -147,6 +147,7 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
         if matches:
             df.rename(columns={matches[0]: "Type"}, inplace=True)
 
+    # Preserve a deterministic trade number column for downstream ordering/QA.
     df = df.dropna(subset=["Type"])
     df = df[df["Type"] != "Type"]
     df = _canonicalize_columns(df)
@@ -182,6 +183,7 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
     sym, interval, strat = parse_filename_meta(str(file_path))
     trades: list[dict[str, Any]] = []
     last_exit_cum = 0.0
+    # Keep the raw cumulative/net profit values for QA/parity; recomputation happens separately.
     open_by_no: dict[int, dict[str, Any]] = {}
 
     for _, row in df.iterrows():
@@ -191,9 +193,11 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
         cum_val = float(row.get("Net Profit - Cum Net Profit", np.nan))
         if math.isnan(cum_val):
             cum_val = last_exit_cum
+        raw_net_profit = float(row.get("Net Profit - Cum Net Profit", np.nan)) if "Net Profit - Cum Net Profit" in df.columns else np.nan
 
         if rtype in entry_types:
             open_by_no[tno] = {
+                "trade_no": tno,
                 "entry_time": ts,
                 "entry_type": rtype,
                 "entry_price": float(row.get("Price", np.nan)) if "Price" in row else np.nan,
@@ -202,17 +206,22 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
                 else np.nan,
                 "runup": float(row.get("Run-up/Drawdown", 0.0)) if "Run-up/Drawdown" in row else 0.0,
                 "pct_profit_raw": float(row.get("% Profit", np.nan)) if "% Profit" in row else np.nan,
+                "net_profit_raw": raw_net_profit,
+                "cum_net_profit_raw": cum_val,
             }
         elif rtype in exit_types:
             ent = open_by_no.pop(
                 tno,
                 {
+                    "trade_no": tno,
                     "entry_time": pd.NaT,
                     "entry_type": None,
                     "entry_price": np.nan,
                     "contracts": np.nan,
                     "runup": 0.0,
                     "pct_profit_raw": np.nan,
+                    "net_profit_raw": np.nan,
+                    "cum_net_profit_raw": np.nan,
                 },
             )
             netp = float(cum_val) - float(last_exit_cum)
@@ -223,6 +232,7 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
             comm = float(row.get("Comm.", 0.0)) if "Comm." in row else 0.0
             slip = float(row.get("Slippage", 0.0)) if "Slippage" in row else 0.0
             gross_pl = float(row.get("Shares/Ctrts - Profit/Loss", np.nan)) if "Shares/Ctrts - Profit/Loss" in row else np.nan
+            exit_net_profit_raw = raw_net_profit
 
             pct_raw = ent.get("pct_profit_raw")
             notional = np.nan
@@ -246,6 +256,7 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
             trades.append(
                 {
                     "File": os.path.basename(file_path),
+                    "trade_no": ent.get("trade_no"),
                     "Symbol": sym,
                     "Interval": interval,
                     "Strategy": strat,
@@ -263,6 +274,7 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
                     "slippage": float(slip),
                     "net_profit": float(netp),
                     "CumulativePL_raw": float(last_exit_cum),
+                    "net_profit_raw": float(ent.get("net_profit_raw")) if not math.isnan(ent.get("net_profit_raw", math.nan)) else float(exit_net_profit_raw) if not math.isnan(exit_net_profit_raw) else np.nan,
                     "pct_profit_raw": float(pct_raw) if pct_raw is not None else np.nan,
                     "notional_exposure": float(notional) if notional is not None else np.nan,
                 }
@@ -272,6 +284,7 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
         trades.append(
             {
                 "File": os.path.basename(file_path),
+                "trade_no": ent.get("trade_no"),
                 "Symbol": sym,
                 "Interval": interval,
                 "Strategy": strat,
@@ -288,6 +301,7 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
                 "slippage": 0.0,
                 "net_profit": 0.0,
                 "CumulativePL_raw": float(last_exit_cum),
+                "net_profit_raw": float(ent.get("net_profit_raw")) if not math.isnan(ent.get("net_profit_raw", math.nan)) else np.nan,
                 "gross_profit": np.nan,
                 "pct_profit_raw": float(ent.get("pct_profit_raw")) if not math.isnan(ent.get("pct_profit_raw", np.nan)) else np.nan,
                 "notional_exposure": np.nan,
