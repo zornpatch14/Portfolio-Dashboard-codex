@@ -11,6 +11,12 @@ class ContractSpec:
     initial_margin: float
     maintenance_margin: float
     big_point_value: float
+    session_start_day_offset: int = -1  # days offset relative to mtm_date (start on prior day)
+    session_start_hour: int = 17
+    session_start_minute: int = 0
+    session_end_day_offset: int = 0    # end on mtm_date
+    session_end_hour: int = 16
+    session_end_minute: int = 15
 
 
 # Default margin/point specs; extend as needed.

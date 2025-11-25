@@ -93,16 +93,16 @@ def _canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _parse_mtm_daily_sheet(xls: pd.ExcelFile, filename: str) -> pd.DataFrame:
+def _parse_mtm_daily_sheet(xls: pd.ExcelFile, filename: str, symbol: str | None = None) -> pd.DataFrame:
     """Extract the optional Daily MTM sheet."""
 
     if "Daily" not in xls.sheet_names:
-        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit"])
+        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"])
 
     try:
         raw = pd.read_excel(xls, sheet_name="Daily", header=None, engine="openpyxl")
     except Exception:
-        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit"])
+        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"])
 
     header_idx = None
     for i in range(min(len(raw), 50)):
@@ -112,28 +112,40 @@ def _parse_mtm_daily_sheet(xls: pd.ExcelFile, filename: str) -> pd.DataFrame:
             break
 
     if header_idx is None:
-        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit"])
+        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"])
 
     try:
         daily = pd.read_excel(xls, sheet_name="Daily", header=header_idx, engine="openpyxl")
     except Exception:
-        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit"])
+        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"])
 
     daily = daily.rename(columns=lambda c: str(c).strip())
     if "Period" not in daily.columns or "Net Profit" not in daily.columns:
-        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit"])
+        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"])
 
     out = daily[["Period", "Net Profit"]].copy()
     out["Period"] = pd.to_datetime(out["Period"], errors="coerce").dt.normalize()
     out["Net Profit"] = pd.to_numeric(out["Net Profit"], errors="coerce")
     out = out.dropna(subset=["Period", "Net Profit"])
     if out.empty:
-        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit"])
+        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"])
 
     out = out.sort_values("Period").reset_index(drop=True)
     out["File"] = os.path.basename(filename)
     out = out.rename(columns={"Period": "mtm_date", "Net Profit": "mtm_net_profit"})
-    return out[["File", "mtm_date", "mtm_net_profit"]]
+
+    # Build explicit session bounds from symbol spec (defaults to 5pm prior -> 4:15pm current).
+    from api.app.constants import get_contract_spec
+
+    spec = get_contract_spec(symbol or "")
+    out["mtm_session_start"] = out["mtm_date"] + pd.Timedelta(days=spec.session_start_day_offset) + pd.Timedelta(
+        hours=spec.session_start_hour, minutes=spec.session_start_minute
+    )
+    out["mtm_session_end"] = out["mtm_date"] + pd.Timedelta(days=spec.session_end_day_offset) + pd.Timedelta(
+        hours=spec.session_end_hour, minutes=spec.session_end_minute
+    )
+
+    return out[["File", "mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"]]
 
 
 def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFrame]:
@@ -344,16 +356,17 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
             "CumulativePL_raw",
             "pct_profit_raw",
             "notional_exposure",
+            "net_profit_raw",
         ]
         for c in num_cols:
             if c in trades_df.columns:
                 trades_df[c] = pd.to_numeric(trades_df[c], errors="coerce")
 
         if "exit_time" in trades_df.columns:
-            trades_df.sort_values("exit_time", inplace=True)
+            trades_df.sort_values(["exit_time", "entry_time", "trade_no"], inplace=True)
             trades_df.reset_index(drop=True, inplace=True)
 
-    mtm_daily = _parse_mtm_daily_sheet(xls, str(file_path))
+    mtm_daily = _parse_mtm_daily_sheet(xls, str(file_path), symbol=sym)
     return pl.from_pandas(trades_df), pl.from_pandas(mtm_daily)
 
 
@@ -448,6 +461,8 @@ class IngestService:
 
     def ingest_file(self, xlsx_path: Path) -> TradeFileMetadata:
         trades_df, mtm_df = parse_tradestation_trades(xlsx_path)
+        if trades_df.is_empty():
+            raise ValueError(f"No trades parsed from {xlsx_path.name}")
 
         file_hash = _sha256_file(xlsx_path)
         file_id = file_hash[:12]
@@ -455,6 +470,10 @@ class IngestService:
         self.trades_dir.mkdir(parents=True, exist_ok=True)
         self.mtm_dir.mkdir(parents=True, exist_ok=True)
 
+        # Deterministic ordering for downstream compute/caching.
+        sort_keys = [key for key in ["exit_time", "entry_time", "trade_no"] if key in trades_df.columns]
+        if sort_keys:
+            trades_df = trades_df.sort(sort_keys)
         trades_path = self.trades_dir / f"{file_id}.parquet"
         trades_df.write_parquet(trades_path)
 
