@@ -15,6 +15,7 @@ from fastapi import HTTPException, UploadFile, status
 from api.app.compute.caches import PerFileCache
 from api.app.compute.downsampling import downsample_timeseries
 from api.app.compute.portfolio import PortfolioAggregator, PortfolioView
+from api.app.constants import get_contract_spec
 from api.app.ingest import IngestService, TradeFileMetadata
 from api.app.schemas import (
     FileMetadata,
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 def _meta_to_schema(meta: TradeFileMetadata) -> FileMetadata:
+    spec = get_contract_spec(meta.symbol)
     intervals: list[str] = []
     if meta.interval is not None:
         intervals = [str(meta.interval)]
@@ -45,6 +47,8 @@ def _meta_to_schema(meta: TradeFileMetadata) -> FileMetadata:
         date_min=meta.date_min.date() if isinstance(meta.date_min, datetime) else meta.date_min,
         date_max=meta.date_max.date() if isinstance(meta.date_max, datetime) else meta.date_max,
         mtm_available=meta.mtm_rows > 0,
+        margin_per_contract=spec.initial_margin if spec else None,
+        big_point_value=spec.big_point_value if spec else None,
     )
 
 
