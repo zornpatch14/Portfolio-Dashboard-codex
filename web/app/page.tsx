@@ -1377,6 +1377,33 @@ export default function HomePage() {
       <div className="grid-2" style={{ marginTop: 14 }}>
         <div className="card">
           <strong>Included files</strong>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 120px 140px',
+              gap: 10,
+              alignItems: 'center',
+              marginTop: 8,
+            }}
+          >
+            <div className="text-muted small" />
+            <button
+              type="button"
+              className="button"
+              style={{ width: '100%' }}
+              onClick={() =>
+                setActiveSelection((prev) => ({
+                  ...prev,
+                  contracts: Object.fromEntries(availableFiles.map((file) => [file, 1])),
+                }))
+              }
+            >
+              Use default contracts (1)
+            </button>
+            <button type="button" className="button" style={{ width: '100%' }} disabled>
+              Use default margin (placeholder)
+            </button>
+          </div>
           <div className="file-rows" style={{ marginTop: 10, display: 'grid', gap: 10 }}>
             {availableFiles.map((file) => {
               const active = activeSelection.files.includes(file);
