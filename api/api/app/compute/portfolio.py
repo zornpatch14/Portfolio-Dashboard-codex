@@ -13,7 +13,6 @@ from api.app.compute.downsampling import DownsampleResult, downsample_timeseries
 @dataclass
 class PortfolioView:
     equity: pl.DataFrame
-    percent_equity: pl.DataFrame
     daily_returns: pl.DataFrame
     net_position: pl.DataFrame
     margin: pl.DataFrame
@@ -30,7 +29,6 @@ class PortfolioAggregator:
             empty = pl.DataFrame({"timestamp": [], "value": []})
             return PortfolioView(
                 equity=empty,
-                percent_equity=empty,
                 daily_returns=empty,
                 net_position=empty,
                 margin=empty,
@@ -54,9 +52,6 @@ class PortfolioAggregator:
             pl.col("date").alias("timestamp"),
             (pl.col("pnl").cum_sum() + starting_equity).alias("equity"),
         )
-        percent_equity = equity_curve.with_columns(
-            (pl.col("equity") / starting_equity * 100).alias("percent_equity")
-        )
 
         netpos_frames = [self.cache.net_position(path) for path in files]
         netpos = _combine_timeseries(netpos_frames, "net_position")
@@ -66,7 +61,6 @@ class PortfolioAggregator:
 
         return PortfolioView(
             equity=equity_curve,
-            percent_equity=percent_equity,
             daily_returns=combined_daily,
             net_position=netpos,
             margin=margin,

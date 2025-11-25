@@ -13,7 +13,6 @@ from api.app.data.loader import LoadedTrades, load_trade_file
 @dataclass
 class SeriesBundle:
     equity: pl.DataFrame
-    percent_equity: pl.DataFrame
     daily_returns: pl.DataFrame
     net_position: pl.DataFrame
     margin: pl.DataFrame
@@ -59,9 +58,6 @@ class PerFileCache:
     def equity_curve(self, path: Path) -> pl.DataFrame:
         return self._get_or_build(path, "equity", self._compute_equity)
 
-    def percent_equity(self, path: Path) -> pl.DataFrame:
-        return self._get_or_build(path, "percent_equity", self._compute_percent_equity)
-
     def daily_returns(self, path: Path) -> pl.DataFrame:
         return self._get_or_build(path, "daily_returns", self._compute_daily_returns)
 
@@ -77,7 +73,6 @@ class PerFileCache:
     def bundle(self, path: Path) -> SeriesBundle:
         return SeriesBundle(
             equity=self.equity_curve(path),
-            percent_equity=self.percent_equity(path),
             daily_returns=self.daily_returns(path),
             net_position=self.net_position(path),
             margin=self.margin_usage(path),
