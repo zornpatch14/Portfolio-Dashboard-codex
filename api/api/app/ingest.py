@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import os
+import logging
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,10 @@ from typing import Any, Iterable
 import numpy as np
 import pandas as pd
 import polars as pl
+
+from api.app.constants import DEFAULT_CONTRACT_MULTIPLIER, get_contract_spec, MARGIN_SPEC
+
+logger = logging.getLogger(__name__)
 
 
 # --- Filename parsing helpers -------------------------------------------------
@@ -91,16 +96,18 @@ def _canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _parse_mtm_daily_sheet(xls: pd.ExcelFile, filename: str) -> pd.DataFrame:
+def _parse_mtm_daily_sheet(xls: pd.ExcelFile, filename: str, symbol: str | None = None) -> pd.DataFrame:
     """Extract the optional Daily MTM sheet."""
 
     if "Daily" not in xls.sheet_names:
-        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit"])
+        logger.warning("MTM sheet 'Daily' missing in %s", os.path.basename(filename))
+        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"])
 
     try:
         raw = pd.read_excel(xls, sheet_name="Daily", header=None, engine="openpyxl")
     except Exception:
-        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit"])
+        logger.warning("Failed reading MTM sheet in %s", os.path.basename(filename))
+        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"])
 
     header_idx = None
     for i in range(min(len(raw), 50)):
@@ -110,28 +117,40 @@ def _parse_mtm_daily_sheet(xls: pd.ExcelFile, filename: str) -> pd.DataFrame:
             break
 
     if header_idx is None:
-        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit"])
+        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"])
 
     try:
         daily = pd.read_excel(xls, sheet_name="Daily", header=header_idx, engine="openpyxl")
     except Exception:
-        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit"])
+        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"])
 
     daily = daily.rename(columns=lambda c: str(c).strip())
     if "Period" not in daily.columns or "Net Profit" not in daily.columns:
-        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit"])
+        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"])
 
     out = daily[["Period", "Net Profit"]].copy()
     out["Period"] = pd.to_datetime(out["Period"], errors="coerce").dt.normalize()
     out["Net Profit"] = pd.to_numeric(out["Net Profit"], errors="coerce")
     out = out.dropna(subset=["Period", "Net Profit"])
     if out.empty:
-        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit"])
+        return pd.DataFrame(columns=["mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"])
 
     out = out.sort_values("Period").reset_index(drop=True)
     out["File"] = os.path.basename(filename)
     out = out.rename(columns={"Period": "mtm_date", "Net Profit": "mtm_net_profit"})
-    return out[["File", "mtm_date", "mtm_net_profit"]]
+
+    # Build explicit session bounds from symbol spec (defaults to 5pm prior -> 4:15pm current).
+    from api.app.constants import get_contract_spec
+
+    spec = get_contract_spec(symbol or "")
+    out["mtm_session_start"] = out["mtm_date"] + pd.Timedelta(days=spec.session_start_day_offset) + pd.Timedelta(
+        hours=spec.session_start_hour, minutes=spec.session_start_minute
+    )
+    out["mtm_session_end"] = out["mtm_date"] + pd.Timedelta(days=spec.session_end_day_offset) + pd.Timedelta(
+        hours=spec.session_end_hour, minutes=spec.session_end_minute
+    )
+
+    return out[["File", "mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"]]
 
 
 def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFrame]:
@@ -147,6 +166,7 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
         if matches:
             df.rename(columns={matches[0]: "Type"}, inplace=True)
 
+    # Preserve a deterministic trade number column for downstream ordering/QA.
     df = df.dropna(subset=["Type"])
     df = df[df["Type"] != "Type"]
     df = _canonicalize_columns(df)
@@ -180,8 +200,15 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
     exit_types = {"Sell", "Buy to Cover"}
 
     sym, interval, strat = parse_filename_meta(str(file_path))
+    spec = get_contract_spec(sym)
+    # Validate symbol presence; defer unknown symbols to compute with fallback spec.
+    if not sym or sym == "UNKNOWN":
+        raise ValueError(f"Missing or unknown symbol in filename {file_path.name}")
+    if sym not in MARGIN_SPEC:
+        logger.warning("Symbol %s not in MARGIN_SPEC; using fallback margins/BPV", sym)
     trades: list[dict[str, Any]] = []
     last_exit_cum = 0.0
+    # Keep the raw cumulative/net profit values for QA/parity; recomputation happens separately.
     open_by_no: dict[int, dict[str, Any]] = {}
 
     for _, row in df.iterrows():
@@ -191,9 +218,13 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
         cum_val = float(row.get("Net Profit - Cum Net Profit", np.nan))
         if math.isnan(cum_val):
             cum_val = last_exit_cum
+        raw_net_profit = float(row.get("Net Profit - Cum Net Profit", np.nan)) if "Net Profit - Cum Net Profit" in df.columns else np.nan
+        comm = float(row.get("Comm.", 0.0)) if "Comm." in row else 0.0
+        slip = float(row.get("Slippage", 0.0)) if "Slippage" in row else 0.0
 
         if rtype in entry_types:
             open_by_no[tno] = {
+                "trade_no": tno,
                 "entry_time": ts,
                 "entry_type": rtype,
                 "entry_price": float(row.get("Price", np.nan)) if "Price" in row else np.nan,
@@ -202,27 +233,46 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
                 else np.nan,
                 "runup": float(row.get("Run-up/Drawdown", 0.0)) if "Run-up/Drawdown" in row else 0.0,
                 "pct_profit_raw": float(row.get("% Profit", np.nan)) if "% Profit" in row else np.nan,
+                "net_profit_raw": raw_net_profit,
+                "cum_net_profit_raw": cum_val,
+                "entry_commission": comm,
+                "entry_slippage": slip,
             }
         elif rtype in exit_types:
             ent = open_by_no.pop(
                 tno,
                 {
+                    "trade_no": tno,
                     "entry_time": pd.NaT,
                     "entry_type": None,
                     "entry_price": np.nan,
                     "contracts": np.nan,
                     "runup": 0.0,
                     "pct_profit_raw": np.nan,
+                    "net_profit_raw": np.nan,
+                    "cum_net_profit_raw": np.nan,
+                    "entry_commission": 0.0,
+                    "entry_slippage": 0.0,
                 },
             )
-            netp = float(cum_val) - float(last_exit_cum)
-            last_exit_cum = float(cum_val)
-
             exit_price = float(row.get("Price", np.nan)) if "Price" in row else np.nan
             drawdown_trade = float(row.get("Run-up/Drawdown", 0.0)) if "Run-up/Drawdown" in row else 0.0
-            comm = float(row.get("Comm.", 0.0)) if "Comm." in row else 0.0
-            slip = float(row.get("Slippage", 0.0)) if "Slippage" in row else 0.0
             gross_pl = float(row.get("Shares/Ctrts - Profit/Loss", np.nan)) if "Shares/Ctrts - Profit/Loss" in row else np.nan
+            exit_net_profit_raw = raw_net_profit
+
+            # Recompute net profit from prices/BPV/fees with deterministic direction.
+            entry_price = float(ent.get("entry_price") or np.nan)
+            contracts = float(ent.get("contracts") or 0.0)
+            direction_entry = str(ent.get("entry_type") or "").lower()
+            is_long = direction_entry == "buy"
+            sign = 1 if is_long else -1
+            price_diff = (exit_price - entry_price) * sign
+            fees = float(ent.get("entry_commission") or 0.0) + comm + float(ent.get("entry_slippage") or 0.0) + slip
+            recomputed_net = (price_diff * spec.big_point_value * abs(contracts) * DEFAULT_CONTRACT_MULTIPLIER) - fees
+            if not math.isfinite(recomputed_net):
+                recomputed_net = 0.0
+            netp = recomputed_net
+            last_exit_cum = float(cum_val)
 
             pct_raw = ent.get("pct_profit_raw")
             notional = np.nan
@@ -246,6 +296,7 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
             trades.append(
                 {
                     "File": os.path.basename(file_path),
+                    "trade_no": ent.get("trade_no"),
                     "Symbol": sym,
                     "Interval": interval,
                     "Strategy": strat,
@@ -263,8 +314,11 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
                     "slippage": float(slip),
                     "net_profit": float(netp),
                     "CumulativePL_raw": float(last_exit_cum),
+                    "net_profit_raw": float(ent.get("net_profit_raw")) if not math.isnan(ent.get("net_profit_raw", math.nan)) else float(exit_net_profit_raw) if not math.isnan(exit_net_profit_raw) else np.nan,
                     "pct_profit_raw": float(pct_raw) if pct_raw is not None else np.nan,
                     "notional_exposure": float(notional) if notional is not None else np.nan,
+                    "margin_per_contract": float(spec.initial_margin),
+                    "big_point_value": float(spec.big_point_value),
                 }
             )
 
@@ -272,6 +326,7 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
         trades.append(
             {
                 "File": os.path.basename(file_path),
+                "trade_no": ent.get("trade_no"),
                 "Symbol": sym,
                 "Interval": interval,
                 "Strategy": strat,
@@ -288,9 +343,12 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
                 "slippage": 0.0,
                 "net_profit": 0.0,
                 "CumulativePL_raw": float(last_exit_cum),
+                "net_profit_raw": float(ent.get("net_profit_raw")) if not math.isnan(ent.get("net_profit_raw", math.nan)) else np.nan,
                 "gross_profit": np.nan,
                 "pct_profit_raw": float(ent.get("pct_profit_raw")) if not math.isnan(ent.get("pct_profit_raw", np.nan)) else np.nan,
                 "notional_exposure": np.nan,
+                "margin_per_contract": float(spec.initial_margin),
+                "big_point_value": float(spec.big_point_value),
             }
         )
 
@@ -312,16 +370,24 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
             "CumulativePL_raw",
             "pct_profit_raw",
             "notional_exposure",
+            "net_profit_raw",
+            "margin_per_contract",
+            "big_point_value",
         ]
         for c in num_cols:
             if c in trades_df.columns:
                 trades_df[c] = pd.to_numeric(trades_df[c], errors="coerce")
 
+        # Validate numeric price columns; fail fast if non-numeric prices are present.
+        for price_col in ["entry_price", "exit_price"]:
+            if price_col in trades_df.columns and trades_df[price_col].isna().all():
+                raise ValueError(f"No numeric prices parsed in column {price_col} for {file_path.name}")
+
         if "exit_time" in trades_df.columns:
-            trades_df.sort_values("exit_time", inplace=True)
+            trades_df.sort_values(["exit_time", "entry_time", "trade_no"], inplace=True)
             trades_df.reset_index(drop=True, inplace=True)
 
-    mtm_daily = _parse_mtm_daily_sheet(xls, str(file_path))
+    mtm_daily = _parse_mtm_daily_sheet(xls, str(file_path), symbol=sym)
     return pl.from_pandas(trades_df), pl.from_pandas(mtm_daily)
 
 
@@ -342,6 +408,7 @@ class TradeFileMetadata:
     mtm_rows: int
     trades_path: str
     mtm_path: str | None
+    data_version: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -416,13 +483,20 @@ class IngestService:
 
     def ingest_file(self, xlsx_path: Path) -> TradeFileMetadata:
         trades_df, mtm_df = parse_tradestation_trades(xlsx_path)
+        if trades_df.is_empty():
+            raise ValueError(f"No trades parsed from {xlsx_path.name}")
 
         file_hash = _sha256_file(xlsx_path)
         file_id = file_hash[:12]
+        data_version = os.getenv("DATA_VERSION")
 
         self.trades_dir.mkdir(parents=True, exist_ok=True)
         self.mtm_dir.mkdir(parents=True, exist_ok=True)
 
+        # Deterministic ordering for downstream compute/caching.
+        sort_keys = [key for key in ["exit_time", "entry_time", "trade_no"] if key in trades_df.columns]
+        if sort_keys:
+            trades_df = trades_df.sort(sort_keys)
         trades_path = self.trades_dir / f"{file_id}.parquet"
         trades_df.write_parquet(trades_path)
 
@@ -460,6 +534,7 @@ class IngestService:
             mtm_rows=mtm_df.height,
             trades_path=str(trades_path),
             mtm_path=mtm_path,
+            data_version=data_version,
         )
 
         self.index.upsert(meta)

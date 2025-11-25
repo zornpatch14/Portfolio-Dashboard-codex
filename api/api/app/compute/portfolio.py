@@ -2,42 +2,77 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 import polars as pl
 
 from api.app.compute.caches import PerFileCache
 from api.app.compute.downsampling import DownsampleResult, downsample_timeseries
+from api.app.ingest import TradeFileMetadata
 
 
 @dataclass
 class PortfolioView:
     equity: pl.DataFrame
-    percent_equity: pl.DataFrame
     daily_returns: pl.DataFrame
     net_position: pl.DataFrame
     margin: pl.DataFrame
     contributors: list[Path]
+    spikes: pl.DataFrame | None = None
 
 
 class PortfolioAggregator:
     def __init__(self, cache: PerFileCache) -> None:
         self.cache = cache
 
-    def aggregate(self, files: Iterable[Path]) -> PortfolioView:
+    def aggregate(
+        self,
+        files: Iterable[Path],
+        metas: Optional[Iterable[TradeFileMetadata]] = None,
+        contract_multipliers: Optional[dict[str, float]] = None,
+        margin_overrides: Optional[dict[str, float]] = None,
+        direction: Optional[str] = None,
+        include_spikes: bool = False,
+    ) -> PortfolioView:
         files = list(files)
         if not files:
             empty = pl.DataFrame({"timestamp": [], "value": []})
             return PortfolioView(
                 equity=empty,
-                percent_equity=empty,
                 daily_returns=empty,
                 net_position=empty,
                 margin=empty,
                 contributors=[],
+                spikes=pl.DataFrame({"timestamp": [], "marker_value": [], "drawdown": [], "runup": [], "trade_no": []}) if include_spikes else None,
             )
 
-        daily_frames = [self.cache.daily_returns(path) for path in files]
+        meta_map = {m.file_id: m for m in metas} if metas else {}
+        contract_multipliers = contract_multipliers or {}
+        margin_overrides = margin_overrides or {}
+
+        def overrides_for(path: Path) -> tuple[float | None, float | None]:
+            file_id = path.stem
+            symbol = None
+            meta = meta_map.get(file_id)
+            if meta:
+                symbol = (meta.symbol or "").upper()
+            cmult = contract_multipliers.get(symbol, None)
+            margin = margin_overrides.get(symbol, None)
+            return cmult, margin
+
+        daily_frames = []
+        netpos_frames = []
+        margin_frames = []
+        spike_frames: list[pl.DataFrame] = []
+
+        for path in files:
+            cmult, marg = overrides_for(path)
+            daily_frames.append(self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg, direction=direction))
+            netpos_frames.append(self.cache.net_position(path, contract_multiplier=cmult, margin_override=marg, direction=direction))
+            margin_frames.append(self.cache.margin_usage(path, contract_multiplier=cmult, margin_override=marg, direction=direction))
+            if include_spikes:
+                spike_frames.append(self.cache.spike_overlay(path, contract_multiplier=cmult, direction=direction))
+
         combined_daily = pl.concat(daily_frames).group_by("date").agg(
             pnl=pl.col("pnl").sum(),
             capital=pl.col("capital").sum(),
@@ -54,23 +89,18 @@ class PortfolioAggregator:
             pl.col("date").alias("timestamp"),
             (pl.col("pnl").cum_sum() + starting_equity).alias("equity"),
         )
-        percent_equity = equity_curve.with_columns(
-            (pl.col("equity") / starting_equity * 100).alias("percent_equity")
-        )
 
-        netpos_frames = [self.cache.net_position(path) for path in files]
         netpos = _combine_timeseries(netpos_frames, "net_position")
-
-        margin_frames = [self.cache.margin_usage(path) for path in files]
         margin = _combine_timeseries(margin_frames, "margin_used")
+        spikes_df = pl.concat(spike_frames).sort("timestamp") if include_spikes and spike_frames else None
 
         return PortfolioView(
             equity=equity_curve,
-            percent_equity=percent_equity,
             daily_returns=combined_daily,
             net_position=netpos,
             margin=margin,
             contributors=files,
+            spikes=spikes_df,
         )
 
     def downsample_equity(self, view: PortfolioView, target_points: int = 2000) -> DownsampleResult:

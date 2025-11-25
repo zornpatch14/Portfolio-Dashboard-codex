@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import os
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List
@@ -14,7 +15,10 @@ from fastapi import HTTPException, UploadFile, status
 from api.app.compute.caches import PerFileCache
 from api.app.compute.downsampling import downsample_timeseries
 from api.app.compute.portfolio import PortfolioAggregator, PortfolioView
+from api.app.constants import get_contract_spec
 from api.app.ingest import IngestService, TradeFileMetadata
+from api.app.dependencies import selection_hash
+from api.app.services.cache import build_selection_key, get_cache_backend
 from api.app.schemas import (
     FileMetadata,
     FileUploadResponse,
@@ -28,8 +32,11 @@ from api.app.schemas import (
     SeriesResponse,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _meta_to_schema(meta: TradeFileMetadata) -> FileMetadata:
+    spec = get_contract_spec(meta.symbol)
     intervals: list[str] = []
     if meta.interval is not None:
         intervals = [str(meta.interval)]
@@ -42,6 +49,8 @@ def _meta_to_schema(meta: TradeFileMetadata) -> FileMetadata:
         date_min=meta.date_min.date() if isinstance(meta.date_min, datetime) else meta.date_min,
         date_max=meta.date_max.date() if isinstance(meta.date_max, datetime) else meta.date_max,
         mtm_available=meta.mtm_rows > 0,
+        margin_per_contract=spec.initial_margin if spec else None,
+        big_point_value=spec.big_point_value if spec else None,
     )
 
 
@@ -71,6 +80,13 @@ class DataStore:
         self.ingest_service = IngestService(storage_root=root)
         self.cache = PerFileCache(storage_dir=root / ".cache")
         self.aggregator = PortfolioAggregator(self.cache)
+        self._portfolio_cache: dict[str, PortfolioView] = {}
+        self._backend = get_cache_backend()
+        try:
+            ttl_env = os.getenv("PORTFOLIO_CACHE_TTL_SECONDS")
+            self._ttl_seconds = int(ttl_env) if ttl_env else 900
+        except ValueError:
+            self._ttl_seconds = 900
 
     # ---------------- ingest & metadata ----------------
     def ingest(self, files: Iterable[UploadFile]) -> FileUploadResponse:
@@ -84,7 +100,17 @@ class DataStore:
                 tmp.write(content)
                 tmp_path = Path(tmp.name)
 
-            meta = self.ingest_service.ingest_file(tmp_path)
+            try:
+                meta = self.ingest_service.ingest_file(tmp_path)
+            except ValueError as exc:
+                logger.warning("Ingest failed for %s: %s", upload.filename, exc)
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            except Exception as exc:
+                logger.error("Unexpected ingest failure for %s: %s", upload.filename, exc)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to ingest {upload.filename}: {exc}",
+                ) from exc
             uploaded.append(_meta_to_schema(meta))
 
         job_id = str(uuid4())
@@ -118,6 +144,12 @@ class DataStore:
     # ---------------- helpers ----------------
     def _paths_for_selection(self, selection: Selection) -> list[Path]:
         """Filter available files using selection filters and return Parquet paths."""
+
+        filtered = self._metas_for_selection(selection)
+        return [Path(m.trades_path) for m in filtered]
+
+    def _metas_for_selection(self, selection: Selection) -> list[TradeFileMetadata]:
+        """Filter available files using selection filters and return metadata."""
 
         all_meta = self.ingest_service.index.all()
         if selection.files:
@@ -154,7 +186,7 @@ class DataStore:
         if not filtered:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No files match selection filters")
 
-        return [Path(m.trades_path) for m in filtered]
+        return filtered
 
     def _to_points(self, rows, ts_key: str, value_key: str) -> list[SeriesPoint]:
         points: list[SeriesPoint] = []
@@ -169,9 +201,98 @@ class DataStore:
         return points
 
     def _view_for_selection(self, selection: Selection) -> PortfolioView:
-        paths = self._paths_for_selection(selection)
-        view = self.aggregator.aggregate(paths)
+        key = selection_hash(selection)
+        cache_key = build_selection_key(key, selection.data_version, "portfolio")
+
+        cached_view = self._load_portfolio_from_cache(cache_key)
+        if cached_view:
+            view = cached_view
+        else:
+            metas = self._metas_for_selection(selection)
+            paths = [Path(m.trades_path) for m in metas]
+            built = self.aggregator.aggregate(
+                paths,
+                metas=metas,
+                contract_multipliers=selection.contract_multipliers,
+                margin_overrides=selection.margin_overrides,
+                direction=selection.direction,
+                include_spikes=selection.spike_flag,
+            )
+            view = PortfolioView(
+                equity=built.equity.clone(),
+                daily_returns=built.daily_returns.clone(),
+                net_position=built.net_position.clone(),
+                margin=built.margin.clone(),
+                contributors=list(built.contributors),
+                spikes=built.spikes.clone() if built.spikes is not None else None,
+            )
+            self._portfolio_cache[key] = view
+            self._persist_portfolio_to_cache(cache_key, view)
+
         return self._filter_view_by_date(view, selection)
+
+    def _persist_portfolio_to_cache(self, cache_key: str, view: PortfolioView) -> None:
+        try:
+            payload = {
+                "equity": view.equity.write_parquet(),
+                "daily_returns": view.daily_returns.write_parquet(),
+                "net_position": view.net_position.write_parquet(),
+                "margin": view.margin.write_parquet(),
+                "contributors": [str(p) for p in view.contributors],
+                "spikes": view.spikes.write_parquet() if view.spikes is not None else None,
+            }
+            import json
+
+            # Parquet bytes are not JSON serializable; store as a dict of base64-encoded bytes.
+            import base64
+
+            encoded = {
+                "equity": base64.b64encode(payload["equity"]).decode(),
+                "daily_returns": base64.b64encode(payload["daily_returns"]).decode(),
+                "net_position": base64.b64encode(payload["net_position"]).decode(),
+                "margin": base64.b64encode(payload["margin"]).decode(),
+                "contributors": payload["contributors"],
+                "spikes": base64.b64encode(payload["spikes"]).decode() if payload["spikes"] is not None else None,
+            }
+            self._backend.set(cache_key, json.dumps(encoded).encode(), ttl_seconds=self._ttl_seconds)
+        except Exception:
+            logger.warning("Failed to persist portfolio cache for key %s", cache_key, exc_info=True)
+
+    def _load_portfolio_from_cache(self, cache_key: str) -> PortfolioView | None:
+        raw = self._backend.get(cache_key)
+        if raw is None:
+            return None
+        try:
+            import json
+            import base64
+
+            encoded = json.loads(raw.decode())
+
+            def decode_frame(b64val):
+                if b64val is None:
+                    return None
+                data = base64.b64decode(b64val)
+                return pl.read_parquet(data)
+
+            equity = decode_frame(encoded.get("equity"))
+            daily = decode_frame(encoded.get("daily_returns"))
+            netpos = decode_frame(encoded.get("net_position"))
+            margin = decode_frame(encoded.get("margin"))
+            spikes = decode_frame(encoded.get("spikes"))
+            contributors = [Path(p) for p in encoded.get("contributors", [])]
+            if equity is None or daily is None or netpos is None or margin is None:
+                return None
+            return PortfolioView(
+                equity=equity,
+                daily_returns=daily,
+                net_position=netpos,
+                margin=margin,
+                contributors=contributors,
+                spikes=spikes,
+            )
+        except Exception:
+            logger.warning("Failed to load portfolio cache for key %s", cache_key, exc_info=True)
+            return None
 
     def _filter_view_by_date(self, view: PortfolioView, selection: Selection) -> PortfolioView:
         start_dt = selection.start_date
@@ -193,9 +314,10 @@ class DataStore:
             return out
 
         view.equity = filter_frame(view.equity, "timestamp")
-        view.percent_equity = filter_frame(view.percent_equity, "timestamp")
         view.net_position = filter_frame(view.net_position, "timestamp")
         view.margin = filter_frame(view.margin, "timestamp")
+        if view.spikes is not None:
+            view.spikes = filter_frame(view.spikes, "timestamp")
         if start_dt or end_dt:
             view.daily_returns = filter_frame(view.daily_returns, "date", is_date=True)
         return view
@@ -224,9 +346,6 @@ class DataStore:
 
         if series_name == "equity":
             return build_timeseries(view.equity, "equity", "equity")
-
-        if series_name == "equity_percent":
-            return build_timeseries(view.percent_equity, "percent_equity", "equity_percent")
 
         if series_name in {"drawdown", "intraday_drawdown"}:
             dd_values = _drawdown_from_equity(view.equity)
@@ -261,14 +380,34 @@ class DataStore:
         return HistogramResponse(label="return_distribution", selection=selection, buckets=buckets)
 
     def metrics(self, selection: Selection) -> MetricsResponse:
-        paths = self._paths_for_selection(selection)
+        metas = self._metas_for_selection(selection)
+        paths = [Path(m.trades_path) for m in metas]
         rows: list[MetricsRow] = []
+        direction = selection.direction
+
+        def _filter_direction(df: pl.DataFrame) -> pl.DataFrame:
+            if not direction or "direction" not in df.columns:
+                return df
+            dir_norm = direction.lower()
+            dir_col = pl.col("direction").cast(pl.Utf8).str.to_lowercase()
+            if dir_norm == "long":
+                mask = dir_col.is_in(["long", "buy", "buy to open", "buy to cover"])
+            elif dir_norm == "short":
+                mask = dir_col.is_in(["short", "sell short", "sell", "sell to open", "sell to cover"])
+            else:
+                return df
+            return df.filter(mask)
 
         # Per-file metrics
-        for path in paths:
-            equity = self.cache.equity_curve(path)
-            trades_df = self.cache.load_trades(path).trades
-            daily = self.cache.daily_returns(path)
+        for meta in metas:
+            path = Path(meta.trades_path)
+            symbol = (meta.symbol or "").upper()
+            cmult = selection.contract_multipliers.get(symbol)
+            marg = selection.margin_overrides.get(symbol)
+
+            equity = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=marg, direction=direction)
+            trades_df = _filter_direction(self.cache.load_trades(path).trades)
+            daily = self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg, direction=direction)
 
             net_profit = float(equity["equity"][-1] - self.cache.starting_equity) if len(equity) else 0.0
             trades = len(trades_df)
@@ -294,11 +433,12 @@ class DataStore:
             portfolio_net = float(view.equity["equity"][-1] - self.cache.starting_equity)
             port_dd = _max_drawdown(view.equity)
             port_daily = float(view.daily_returns["daily_return"].mean()) if len(view.daily_returns) else 0.0
+            dir_trades = sum(len(_filter_direction(self.cache.load_trades(p).trades)) for p in paths)
             def addp(metric: str, value: float) -> None:
                 rows.append(MetricsRow(file_id="portfolio", metric=metric, value=value, level="portfolio"))
 
             addp("net_profit", portfolio_net)
-            addp("trades", float(sum(len(self.cache.load_trades(p).trades) for p in paths)))
+            addp("trades", float(dir_trades))
             addp("max_drawdown", port_dd)
             addp("avg_daily_return", port_daily)
 

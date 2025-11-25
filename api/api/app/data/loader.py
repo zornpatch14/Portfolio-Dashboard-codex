@@ -9,9 +9,8 @@ from typing import Iterable, List
 import pandas as pd
 import polars as pl
 
-
-DEFAULT_CONTRACT_MULTIPLIER = float(os.getenv("API_CONTRACT_MULTIPLIER", 5))
-DEFAULT_MARGIN_PER_CONTRACT = float(os.getenv("API_MARGIN_PER_CONTRACT", 12000))
+from api.app.constants import DEFAULT_CONTRACT_MULTIPLIER, DEFAULT_MARGIN_PER_CONTRACT, get_contract_spec
+from api.app.ingest import parse_filename_meta
 
 
 @dataclass
@@ -45,10 +44,10 @@ def _pairwise(iterable: Iterable[pd.Series]) -> Iterable[tuple[pd.Series, pd.Ser
         yield entry, exit_row
 
 
-def _compute_net_profit(entry_price: float, exit_price: float, direction: str, contracts: int) -> float:
+def _compute_net_profit(entry_price: float, exit_price: float, direction: str, contracts: int, bpv: float) -> float:
     direction_lower = direction.lower()
     sign = 1 if direction_lower == "buy" else -1
-    return (exit_price - entry_price) * DEFAULT_CONTRACT_MULTIPLIER * contracts * sign
+    return (exit_price - entry_price) * bpv * contracts * sign * DEFAULT_CONTRACT_MULTIPLIER
 
 
 def load_trade_file(path: Path) -> LoadedTrades:
@@ -62,6 +61,10 @@ def load_trade_file(path: Path) -> LoadedTrades:
 
     if path.suffix.lower() == ".parquet":
         trades = pl.read_parquet(path)
+        # Defensive resort to ensure deterministic ordering for downstream cum_sums.
+        sort_keys = [key for key in ["exit_time", "entry_time", "trade_no"] if key in trades.columns]
+        if sort_keys:
+            trades = trades.sort(sort_keys)
         # Ensure required columns exist with sensible defaults.
         if "margin_per_contract" not in trades.columns:
             trades = trades.with_columns(pl.lit(DEFAULT_MARGIN_PER_CONTRACT).alias("margin_per_contract"))
@@ -70,6 +73,10 @@ def load_trade_file(path: Path) -> LoadedTrades:
         return LoadedTrades(file_id=_make_file_id(path), path=path, trades=trades)
 
     df = pd.read_excel(path, skiprows=3)
+    symbol, _, _ = parse_filename_meta(path.name)
+    spec = get_contract_spec(symbol)
+    margin_value = spec.initial_margin if spec else DEFAULT_MARGIN_PER_CONTRACT
+    bpv = spec.big_point_value if spec else 1.0
     records: List[dict] = []
 
     for entry_row, exit_row in _pairwise(df.itertuples(index=False, name=None)):
@@ -87,7 +94,7 @@ def load_trade_file(path: Path) -> LoadedTrades:
         contracts_raw = entry_row[5]
         contracts = int(abs(contracts_raw)) if pd.notna(contracts_raw) and contracts_raw != 0 else 1
 
-        net_profit = _compute_net_profit(entry_price, exit_price, entry_action, contracts)
+        net_profit = _compute_net_profit(entry_price, exit_price, entry_action, contracts, bpv)
 
         records.append(
             {
@@ -98,7 +105,7 @@ def load_trade_file(path: Path) -> LoadedTrades:
                 "exit_price": exit_price,
                 "contracts": contracts,
                 "net_profit": net_profit,
-                "margin_per_contract": DEFAULT_MARGIN_PER_CONTRACT,
+                "margin_per_contract": margin_value,
             }
         )
 

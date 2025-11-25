@@ -15,6 +15,8 @@ class FileMetadata(BaseModel):
     date_min: Optional[date] = None
     date_max: Optional[date] = None
     mtm_available: bool = False
+    margin_per_contract: Optional[float] = None
+    big_point_value: Optional[float] = None
 
 
 class FileUploadResponse(BaseModel):
@@ -31,8 +33,8 @@ class Selection(BaseModel):
     direction: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    contract_multipliers: Dict[str, float] = Field(default_factory=dict)
-    margin_overrides: Dict[str, float] = Field(default_factory=dict)
+    contract_multipliers: Dict[str, float] = Field(default_factory=dict, description="Per-symbol contract multipliers (SYMBOL:VALUE)")
+    margin_overrides: Dict[str, float] = Field(default_factory=dict, description="Per-symbol margin overrides (SYMBOL:VALUE)")
     spike_flag: bool = False
     data_version: Optional[str] = None
 
