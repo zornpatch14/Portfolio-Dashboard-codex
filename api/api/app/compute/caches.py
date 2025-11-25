@@ -69,20 +69,24 @@ class PerFileCache:
         return self._compute_daily_returns(loaded, contract_multiplier, margin_override)
 
     def net_position(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
-        """Return point-in-time net position series; cache when no overrides applied."""
+        """Return point-in-time net position series; cache intervals when no overrides applied."""
 
         if contract_multiplier is None and margin_override is None:
-            return self._get_or_build(path, "netpos", lambda loaded: self._compute_net_positions(loaded, None, None))
+            intervals = self._get_or_build(path, "intervals", lambda loaded: self._netpos_intervals(loaded, None, None)[1])
+            return intervals.select(pl.col("start").alias("timestamp"), pl.col("net_position"))
         loaded = self.load_trades(path)
-        return self._compute_net_positions(loaded, contract_multiplier, margin_override)
+        intervals = self._netpos_intervals(loaded, contract_multiplier=contract_multiplier, margin_override=margin_override)[1]
+        return intervals.select(pl.col("start").alias("timestamp"), pl.col("net_position"))
 
     def margin_usage(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
         """Return margin usage intervals (timestamp=interval start) with caching when no overrides."""
 
         if contract_multiplier is None and margin_override is None:
-            return self._get_or_build(path, "margin", lambda loaded: self._compute_margin(loaded, None, None))
-        loaded = self.load_trades(path)
-        return self._compute_margin(loaded, contract_multiplier, margin_override)
+            intervals = self._get_or_build(path, "intervals", lambda loaded: self._netpos_intervals(loaded, None, None)[1])
+        else:
+            loaded = self.load_trades(path)
+            intervals = self._netpos_intervals(loaded, contract_multiplier=contract_multiplier, margin_override=margin_override)[1]
+        return intervals.select(pl.col("start").alias("timestamp"), pl.col("margin_used"), pl.col("symbol"))
 
     def spike_overlay(self, path: Path, contract_multiplier: float | None = None) -> pl.DataFrame:
         if contract_multiplier is None:
