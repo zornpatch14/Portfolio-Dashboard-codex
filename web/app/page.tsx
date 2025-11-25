@@ -27,6 +27,7 @@ import { loadSampleSelections, Selection } from '../lib/selections';
 const selections = loadSampleSelections();
 const tabs = [
   { key: 'load-trade-lists', label: 'Load Trade Lists' },
+  { key: 'summary', label: 'Summary' },
   { key: 'equity-curves', label: 'Equity Curves' },
   { key: 'portfolio-drawdown', label: 'Portfolio Drawdown' },
   { key: 'margin', label: 'Margin' },
@@ -136,7 +137,7 @@ export default function HomePage() {
 
   const activeBadge = busy ? <div className="badge">Loading...</div> : <div className="badge">Live</div>;
 
-  const renderEquityCurves = () => (
+  const renderSummary = () => (
     <div>
       <div className="flex gap-md" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
         <h2 className="section-title" style={{ margin: 0 }}>
@@ -236,6 +237,18 @@ export default function HomePage() {
         ) : (
           <div className="placeholder-text">No metrics returned yet.</div>
         )}
+      </div>
+    </div>
+  );
+
+  const renderEquityCurves = () => (
+    <div className="panel" style={{ marginTop: 8 }}>
+      <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 className="section-title" style={{ margin: 0 }}>Equity Curves</h3>
+        {activeBadge}
+      </div>
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="placeholder-text">Equity curves view coming soon.</div>
       </div>
     </div>
   );
@@ -802,6 +815,7 @@ export default function HomePage() {
   );
 
   const renderTab = () => {
+    if (activeTab === 'summary') return renderSummary();
     if (activeTab === 'equity-curves') return renderEquityCurves();
     if (activeTab === 'correlations') return renderCorrelations();
     if (activeTab === 'riskfolio') return renderOptimizer();
