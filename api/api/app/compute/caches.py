@@ -57,10 +57,16 @@ class PerFileCache:
         return pl.DataFrame({"mtm_date": [], "mtm_net_profit": [], "mtm_session_start": [], "mtm_session_end": []})
 
     def equity_curve(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
-        return self._get_or_build(path, "equity", lambda loaded: self._compute_equity(loaded, contract_multiplier, margin_override))
+        if contract_multiplier is None and margin_override is None:
+            return self._get_or_build(path, "equity", lambda loaded: self._compute_equity(loaded, None, None))
+        loaded = self.load_trades(path)
+        return self._compute_equity(loaded, contract_multiplier, margin_override)
 
     def daily_returns(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
-        return self._get_or_build(path, "daily_returns", lambda loaded: self._compute_daily_returns(loaded, contract_multiplier, margin_override))
+        if contract_multiplier is None and margin_override is None:
+            return self._get_or_build(path, "daily_returns", lambda loaded: self._compute_daily_returns(loaded, None, None))
+        loaded = self.load_trades(path)
+        return self._compute_daily_returns(loaded, contract_multiplier, margin_override)
 
     def net_position(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
         """Return point-in-time net position series; cache when no overrides applied."""
@@ -210,7 +216,7 @@ class PerFileCache:
         # Use MTM sessions when available.
         if not mtm_df.is_empty():
             mtm_df = mtm_df.sort("mtm_date")
-            _, intervals = self._netpos_intervals(loaded, margin_override=margin_override, trades_override=trades)
+            _, intervals = self._netpos_intervals(loaded, contract_multiplier=contract_multiplier, margin_override=margin_override, trades_override=trades)
             rows = []
             for row in mtm_df.iter_rows(named=True):
                 session_start = row.get("mtm_session_start") or row["mtm_date"]
@@ -253,12 +259,14 @@ class PerFileCache:
 
         # Fallback: group by exit date if MTM absent.
         trades = trades.with_columns(pl.col("exit_time").dt.date().alias("date"))
-        margin_value = margin_override or self.margin_per_contract or float(trades["margin_per_contract"].max())
+        margin_value = margin_override or self.margin_per_contract
+        if margin_value is None:
+            margin_value = float(trades["margin_per_contract"].max()) if "margin_per_contract" in trades.columns else DEFAULT_MARGIN_PER_CONTRACT
         grouped = trades.group_by("date").agg(
             pnl=pl.col("net_profit").sum(),
             contracts=pl.col("contracts").sum(),
         )
-        capital = grouped["contracts"].abs() * margin_value
+        capital = grouped["contracts"].abs() * float(margin_value)
         daily_return = pl.when(capital > 0).then(grouped["pnl"] / capital).otherwise(0)
         return grouped.drop("contracts").with_columns(capital=capital, daily_return=daily_return)
 
