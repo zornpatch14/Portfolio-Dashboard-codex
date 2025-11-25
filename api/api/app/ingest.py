@@ -13,6 +13,8 @@ import numpy as np
 import pandas as pd
 import polars as pl
 
+from api.app.constants import DEFAULT_CONTRACT_MULTIPLIER, get_contract_spec
+
 
 # --- Filename parsing helpers -------------------------------------------------
 
@@ -194,6 +196,8 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
         if math.isnan(cum_val):
             cum_val = last_exit_cum
         raw_net_profit = float(row.get("Net Profit - Cum Net Profit", np.nan)) if "Net Profit - Cum Net Profit" in df.columns else np.nan
+        comm = float(row.get("Comm.", 0.0)) if "Comm." in row else 0.0
+        slip = float(row.get("Slippage", 0.0)) if "Slippage" in row else 0.0
 
         if rtype in entry_types:
             open_by_no[tno] = {
@@ -208,6 +212,8 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
                 "pct_profit_raw": float(row.get("% Profit", np.nan)) if "% Profit" in row else np.nan,
                 "net_profit_raw": raw_net_profit,
                 "cum_net_profit_raw": cum_val,
+                "entry_commission": comm,
+                "entry_slippage": slip,
             }
         elif rtype in exit_types:
             ent = open_by_no.pop(
@@ -222,17 +228,29 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
                     "pct_profit_raw": np.nan,
                     "net_profit_raw": np.nan,
                     "cum_net_profit_raw": np.nan,
+                    "entry_commission": 0.0,
+                    "entry_slippage": 0.0,
                 },
             )
-            netp = float(cum_val) - float(last_exit_cum)
-            last_exit_cum = float(cum_val)
-
             exit_price = float(row.get("Price", np.nan)) if "Price" in row else np.nan
             drawdown_trade = float(row.get("Run-up/Drawdown", 0.0)) if "Run-up/Drawdown" in row else 0.0
-            comm = float(row.get("Comm.", 0.0)) if "Comm." in row else 0.0
-            slip = float(row.get("Slippage", 0.0)) if "Slippage" in row else 0.0
             gross_pl = float(row.get("Shares/Ctrts - Profit/Loss", np.nan)) if "Shares/Ctrts - Profit/Loss" in row else np.nan
             exit_net_profit_raw = raw_net_profit
+
+            # Recompute net profit from prices/BPV/fees with deterministic direction.
+            entry_price = float(ent.get("entry_price") or np.nan)
+            contracts = float(ent.get("contracts") or 0.0)
+            direction_entry = str(ent.get("entry_type") or "").lower()
+            is_long = direction_entry == "buy"
+            sign = 1 if is_long else -1
+            spec = get_contract_spec(sym)
+            price_diff = (exit_price - entry_price) * sign
+            fees = float(ent.get("entry_commission") or 0.0) + comm + float(ent.get("entry_slippage") or 0.0) + slip
+            recomputed_net = (price_diff * spec.big_point_value * abs(contracts) * DEFAULT_CONTRACT_MULTIPLIER) - fees
+            if not math.isfinite(recomputed_net):
+                recomputed_net = 0.0
+            netp = recomputed_net
+            last_exit_cum = float(cum_val)
 
             pct_raw = ent.get("pct_profit_raw")
             notional = np.nan
