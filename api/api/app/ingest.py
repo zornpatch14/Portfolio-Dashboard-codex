@@ -475,6 +475,7 @@ class IngestService:
 
         file_hash = _sha256_file(xlsx_path)
         file_id = file_hash[:12]
+        data_version = os.getenv("DATA_VERSION")
 
         self.trades_dir.mkdir(parents=True, exist_ok=True)
         self.mtm_dir.mkdir(parents=True, exist_ok=True)
@@ -520,7 +521,7 @@ class IngestService:
             mtm_rows=mtm_df.height,
             trades_path=str(trades_path),
             mtm_path=mtm_path,
-            data_version=None,
+            data_version=data_version,
         )
 
         self.index.upsert(meta)
