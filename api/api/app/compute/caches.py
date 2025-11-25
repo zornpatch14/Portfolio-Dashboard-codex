@@ -84,8 +84,11 @@ class PerFileCache:
         loaded = self.load_trades(path)
         return self._compute_margin(loaded, contract_multiplier, margin_override)
 
-    def spike_overlay(self, path: Path) -> pl.DataFrame:
-        return self._get_or_build(path, "spikes", self._compute_spikes)
+    def spike_overlay(self, path: Path, contract_multiplier: float | None = None) -> pl.DataFrame:
+        if contract_multiplier is None:
+            return self._get_or_build(path, "spikes", lambda loaded: self._compute_spikes(loaded, None))
+        loaded = self.load_trades(path)
+        return self._compute_spikes(loaded, contract_multiplier)
 
     def bundle(self, path: Path) -> SeriesBundle:
         return SeriesBundle(
@@ -281,12 +284,25 @@ class PerFileCache:
             pl.col("symbol"),
         )
 
-    def _compute_spikes(self, loaded: LoadedTrades) -> pl.DataFrame:
-        trades = loaded.trades
+    def _compute_spikes(self, loaded: LoadedTrades, contract_multiplier: float | None = None) -> pl.DataFrame:
+        cmult = contract_multiplier if contract_multiplier is not None else self.default_contract_multiplier
+        trades = self._apply_contract_multiplier(loaded.trades, cmult)
         if trades.is_empty():
             return pl.DataFrame({"timestamp": [], "marker_value": [], "drawdown": [], "runup": [], "trade_no": []})
 
-        # Midpoint between entry/exit; marker value will be filled downstream relative to equity if needed.
+        equity = self._compute_equity(loaded, contract_multiplier=contract_multiplier)
+        equity_list = list(equity.iter_rows(named=True))
+
+        def equity_at(ts):
+            if not equity_list:
+                return None
+            prev = equity_list[0]["equity"]
+            for row in equity_list:
+                if row["timestamp"] > ts:
+                    return prev
+                prev = row["equity"]
+            return prev
+
         markers = []
         for row in trades.iter_rows(named=True):
             entry = row.get("entry_time")
@@ -296,14 +312,15 @@ class PerFileCache:
             midpoint = entry + (exit_ - entry) / 2
             drawdown = float(row.get("drawdown_trade", 0.0))
             runup = float(row.get("runup", 0.0))
+            eq_val = equity_at(midpoint)
+            marker_val = (eq_val - drawdown) if eq_val is not None else None
             markers.append(
                 {
                     "timestamp": midpoint,
                     "drawdown": drawdown,
                     "runup": runup,
                     "trade_no": row.get("trade_no"),
-                    # marker_value can be computed at plotting time as equity_at_marker - drawdown
-                    "marker_value": None,
+                    "marker_value": marker_val,
                 }
             )
         return pl.DataFrame(markers) if markers else pl.DataFrame({"timestamp": [], "marker_value": [], "drawdown": [], "runup": [], "trade_no": []})
