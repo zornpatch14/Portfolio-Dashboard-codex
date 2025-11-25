@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 
 import polars as pl
 
@@ -132,25 +132,99 @@ class PerFileCache:
         return grouped.drop("contracts").with_columns(capital=capital, daily_return=daily_return)
 
     def _compute_net_positions(self, loaded: LoadedTrades) -> pl.DataFrame:
-        events = []
-        for row in loaded.trades.iter_rows(named=True):
-            direction = str(row.get("direction", "")).lower()
-            contracts = int(row["contracts"])
-            is_long = direction in {"buy", "long", "buy to open", "buy to cover"}
-            signed = contracts if is_long else -contracts
-            events.append((row["entry_time"], signed))
-            events.append((row["exit_time"], -signed))
-
-        if not events:
-            return pl.DataFrame({"timestamp": [], "net_position": []})
-
-        events.sort(key=lambda tup: tup[0])
-        timestamps, position_deltas = zip(*events)
-        cumulative = pl.Series(position_deltas).cum_sum()
-        return pl.DataFrame({"timestamp": pl.Series(timestamps), "net_position": cumulative})
+        return self._netpos_intervals(loaded)[0]
 
     def _compute_margin(self, loaded: LoadedTrades) -> pl.DataFrame:
-        netpos = self._compute_net_positions(loaded)
-        margin_value = self.margin_per_contract or float(loaded.trades["margin_per_contract"].max())
-        return netpos.with_columns((pl.col("net_position").abs() * margin_value).alias("margin_used"))
+        _, intervals = self._netpos_intervals(loaded)
+        return intervals.select(
+            pl.col("start").alias("timestamp"),
+            pl.col("margin_used"),
+        )
+
+    # ---------- interval builders ----------
+    def _netpos_intervals(self, loaded: LoadedTrades) -> tuple[pl.DataFrame, pl.DataFrame]:
+        """Build per-file net position and margin intervals.
+
+        Returns:
+            points_df: point-in-time net position series (timestamp, net_position)
+            intervals_df: piecewise-constant intervals with start/end, symbol, net_position, margin_used
+        """
+
+        trades = loaded.trades
+        if trades.is_empty():
+            empty_points = pl.DataFrame({"timestamp": [], "net_position": []})
+            empty_intervals = pl.DataFrame({"start": [], "end": [], "symbol": [], "net_position": [], "margin_used": []})
+            return empty_points, empty_intervals
+
+        # Signed events from entry/exit.
+        events = []
+        for row in trades.iter_rows(named=True):
+            direction = str(row.get("direction", "")).lower()
+            contracts = float(row["contracts"])
+            is_long = direction in {"buy", "long", "buy to open", "buy to cover"}
+            signed = contracts if is_long else -contracts
+            events.append((row["entry_time"], signed, row.get("Symbol") or row.get("symbol")))
+            events.append((row["exit_time"], -signed, row.get("Symbol") or row.get("symbol")))
+
+        if not events:
+            empty_points = pl.DataFrame({"timestamp": [], "net_position": []})
+            empty_intervals = pl.DataFrame({"start": [], "end": [], "symbol": [], "net_position": [], "margin_used": []})
+            return empty_points, empty_intervals
+
+        # Sort by time, then stabilize by trade number if needed.
+        events.sort(key=lambda tup: (tup[0],))
+        timestamps, deltas, symbols = zip(*events)
+        cumulative = pl.Series(deltas).cum_sum()
+        points_df = pl.DataFrame({"timestamp": pl.Series(timestamps), "net_position": cumulative})
+
+        # Build intervals as piecewise constant segments between change points.
+        starts = list(timestamps)
+        ends = list(timestamps[1:]) + [timestamps[-1]]
+        netpos_values = list(cumulative)
+        sym = symbols[-1] if symbols else None
+
+        # Margin per contract: prefer override; else from trades; else 0.
+        margin_value = self.margin_per_contract or float(trades["margin_per_contract"].max())
+        interval_df = pl.DataFrame(
+            {
+                "start": starts,
+                "end": ends,
+                "symbol": [sym] * len(starts),
+                "net_position": netpos_values,
+                "margin_used": [abs(v) * margin_value for v in netpos_values],
+            }
+        )
+        return points_df, interval_df
+
+    @staticmethod
+    def expand_intervals_to_minutes(intervals: pl.DataFrame, start: str | None = None, end: str | None = None) -> pl.DataFrame:
+        """Expand piecewise-constant intervals to per-minute samples within an optional window."""
+
+        if intervals.is_empty():
+            return pl.DataFrame({"timestamp": [], "net_position": [], "margin_used": [], "symbol": []})
+
+        samples = []
+        for row in intervals.iter_rows(named=True):
+            s = row["start"]
+            e = row["end"]
+            if start and s < start:
+                s = start
+            if end and e > end:
+                e = end
+            if s >= e:
+                continue
+            rng = pl.datetime_range(start=s, end=e, interval="1m", eager=True, closed="left")
+            samples.append(
+                pl.DataFrame(
+                    {
+                        "timestamp": rng,
+                        "net_position": [row["net_position"]] * len(rng),
+                        "margin_used": [row["margin_used"]] * len(rng),
+                        "symbol": [row.get("symbol")] * len(rng),
+                    }
+                )
+            )
+        if not samples:
+            return pl.DataFrame({"timestamp": [], "net_position": [], "margin_used": [], "symbol": []})
+        return pl.concat(samples).sort("timestamp")
 
