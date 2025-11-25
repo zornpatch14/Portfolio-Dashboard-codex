@@ -26,18 +26,26 @@ import { loadSampleSelections, Selection } from '../lib/selections';
 
 const selections = loadSampleSelections();
 const tabs = [
-  { key: 'overview', label: 'Overview' },
+  { key: 'equity-curves', label: 'Equity Curves' },
   { key: 'correlations', label: 'Correlations' },
-  { key: 'optimizer', label: 'Optimizer' },
-  { key: 'cta', label: 'CTA & Reports' },
-  { key: 'ingest', label: 'Uploads & Exports' },
+  { key: 'riskfolio', label: 'Riskfolio' },
+  { key: 'cta-report', label: 'CTA Report' },
+  { key: 'load-trade-lists', label: 'Load Trade Lists' },
+  { key: 'settings', label: 'Settings' },
+  { key: 'metrics', label: 'Metrics' },
+  { key: 'portfolio-drawdown', label: 'Portfolio Drawdown' },
+  { key: 'intraday-drawdown', label: 'Intraday Drawdown' },
+  { key: 'margin', label: 'Margin' },
+  { key: 'trade-pl-histogram', label: 'Trade P/L Histogram' },
+  { key: 'inverse-volatility', label: 'Inverse Volatility' },
+  { key: 'allocator', label: 'Allocator' },
 ] as const;
 
 type TabKey = (typeof tabs)[number]['key'];
 
 export default function HomePage() {
   const [activeSelection, setActiveSelection] = useState<Selection>(selections[0]);
-  const [activeTab, setActiveTab] = useState<TabKey>('overview');
+  const [activeTab, setActiveTab] = useState<TabKey>('equity-curves');
   const [corrMode, setCorrMode] = useState('drawdown_pct');
   const [accountEquity, setAccountEquity] = useState(50000);
   const [includeDownsample, setIncludeDownsample] = useState(true);
@@ -131,7 +139,7 @@ export default function HomePage() {
 
   const activeBadge = busy ? <div className="badge">Loading...</div> : <div className="badge">Live</div>;
 
-  const renderOverview = () => (
+  const renderEquityCurves = () => (
     <div>
       <div className="flex gap-md" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
         <h2 className="section-title" style={{ margin: 0 }}>
@@ -527,6 +535,129 @@ export default function HomePage() {
     </div>
   );
 
+  const renderPortfolioDrawdown = () => (
+    <div className="panel" style={{ marginTop: 8 }}>
+      <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 className="section-title" style={{ margin: 0 }}>Portfolio Drawdown</h3>
+        {activeBadge}
+      </div>
+      <div className="card" style={{ marginTop: 12 }}>
+        <SeriesChart
+          title="Portfolio Drawdown"
+          series={drawdownQuery.data ?? mockSeries(activeSelection, 'drawdown')}
+          color="#ff8f6b"
+        />
+        <div className="text-muted small">
+          Points: {drawdownQuery.data?.downsampledCount ?? drawdownQuery.data?.points.length ?? 0}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderIntradayDrawdown = () => (
+    <div className="panel" style={{ marginTop: 8 }}>
+      <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 className="section-title" style={{ margin: 0 }}>Intraday Drawdown</h3>
+        {activeBadge}
+      </div>
+      <div className="card" style={{ marginTop: 12 }}>
+        <SeriesChart
+          title="Intraday Drawdown"
+          series={intradayDdQuery.data ?? mockSeries(activeSelection, 'intradayDrawdown')}
+          color="#f4c95d"
+        />
+        <div className="text-muted small">
+          Points: {intradayDdQuery.data?.downsampledCount ?? intradayDdQuery.data?.points.length ?? 0}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderMargin = () => (
+    <div className="panel" style={{ marginTop: 8 }}>
+      <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 className="section-title" style={{ margin: 0 }}>Margin</h3>
+        {activeBadge}
+      </div>
+      <div className="card" style={{ marginTop: 12 }}>
+        <SeriesChart title="Margin Usage" series={marginQuery.data ?? mockSeries(activeSelection, 'margin')} color="#54ffd0" />
+        <div className="text-muted small">
+          Points: {marginQuery.data?.downsampledCount ?? marginQuery.data?.points.length ?? 0}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderHistogram = () => (
+    <div className="panel" style={{ marginTop: 8 }}>
+      <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 className="section-title" style={{ margin: 0 }}>Trade P/L Histogram</h3>
+        {activeBadge}
+      </div>
+      <div className="card" style={{ marginTop: 12 }}>
+        <HistogramChart histogram={histogramQuery.data ?? mockHistogram(activeSelection)} />
+        <div className="text-muted small">
+          Distribution: {histogramQuery.data?.buckets.length ?? 0} buckets
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderMetrics = () => (
+    <div className="panel" style={{ marginTop: 8 }}>
+      <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 className="section-title" style={{ margin: 0 }}>Metrics</h3>
+        {activeBadge}
+      </div>
+      <div style={{ marginTop: 12 }}>
+        {metricsQuery.data && metricsQuery.data.length ? (
+          <MetricsGrid rows={metricsQuery.data} />
+        ) : (
+          <div className="placeholder-text">No metrics returned yet.</div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderInverseVolatility = () => (
+    <div className="panel" style={{ marginTop: 8 }}>
+      <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 className="section-title" style={{ margin: 0 }}>Inverse Volatility</h3>
+        {activeBadge}
+      </div>
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="text-muted small">Placeholder for inverse-volatility controls and tables from the legacy app.</div>
+      </div>
+    </div>
+  );
+
+  const renderAllocator = () => (
+    <div className="panel" style={{ marginTop: 8 }}>
+      <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 className="section-title" style={{ margin: 0 }}>Allocator</h3>
+        {activeBadge}
+      </div>
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="text-muted small">Allocator UI placeholder to mirror the legacy tab (sizing, cash, contracts).</div>
+      </div>
+    </div>
+  );
+
+  const renderSettings = () => (
+    <div className="panel" style={{ marginTop: 8 }}>
+      <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 className="section-title" style={{ margin: 0 }}>Settings</h3>
+        {activeBadge}
+      </div>
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="text-muted small">
+          Selection filters live in the left rail (symbols, timeframes, strategies, direction, date range, spike toggle). This tab will
+          mirror the legacy settings layout as needed.
+        </div>
+      </div>
+    </div>
+  );
+
   const renderIngest = () => (
     <div className="panel" style={{ marginTop: 8 }}>
       <h3 className="section-title" style={{ margin: 0 }}>Load Trade Lists & Exports</h3>
@@ -654,11 +785,20 @@ export default function HomePage() {
   );
 
   const renderTab = () => {
-    if (activeTab === 'overview') return renderOverview();
+    if (activeTab === 'equity-curves') return renderEquityCurves();
     if (activeTab === 'correlations') return renderCorrelations();
-    if (activeTab === 'optimizer') return renderOptimizer();
-    if (activeTab === 'cta') return renderCta();
-    return renderIngest();
+    if (activeTab === 'riskfolio') return renderOptimizer();
+    if (activeTab === 'cta-report') return renderCta();
+    if (activeTab === 'load-trade-lists') return renderIngest();
+    if (activeTab === 'settings') return renderSettings();
+    if (activeTab === 'metrics') return renderMetrics();
+    if (activeTab === 'portfolio-drawdown') return renderPortfolioDrawdown();
+    if (activeTab === 'intraday-drawdown') return renderIntradayDrawdown();
+    if (activeTab === 'margin') return renderMargin();
+    if (activeTab === 'trade-pl-histogram') return renderHistogram();
+    if (activeTab === 'inverse-volatility') return renderInverseVolatility();
+    if (activeTab === 'allocator') return renderAllocator();
+    return renderEquityCurves();
   };
 
   return (
