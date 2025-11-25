@@ -387,6 +387,7 @@ class TradeFileMetadata:
     mtm_rows: int
     trades_path: str
     mtm_path: str | None
+    data_version: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -511,6 +512,7 @@ class IngestService:
             mtm_rows=mtm_df.height,
             trades_path=str(trades_path),
             mtm_path=mtm_path,
+            data_version=None,
         )
 
         self.index.upsert(meta)
