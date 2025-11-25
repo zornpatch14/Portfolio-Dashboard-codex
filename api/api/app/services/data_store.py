@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import os
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List
@@ -27,6 +28,8 @@ from api.app.schemas import (
     SeriesPoint,
     SeriesResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _meta_to_schema(meta: TradeFileMetadata) -> FileMetadata:
@@ -84,7 +87,17 @@ class DataStore:
                 tmp.write(content)
                 tmp_path = Path(tmp.name)
 
-            meta = self.ingest_service.ingest_file(tmp_path)
+            try:
+                meta = self.ingest_service.ingest_file(tmp_path)
+            except ValueError as exc:
+                logger.warning("Ingest failed for %s: %s", upload.filename, exc)
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            except Exception as exc:
+                logger.error("Unexpected ingest failure for %s: %s", upload.filename, exc)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to ingest {upload.filename}: {exc}",
+                ) from exc
             uploaded.append(_meta_to_schema(meta))
 
         job_id = str(uuid4())

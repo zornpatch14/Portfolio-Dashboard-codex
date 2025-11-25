@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import os
+import logging
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +14,9 @@ import numpy as np
 import pandas as pd
 import polars as pl
 
-from api.app.constants import DEFAULT_CONTRACT_MULTIPLIER, get_contract_spec
+from api.app.constants import DEFAULT_CONTRACT_MULTIPLIER, get_contract_spec, MARGIN_SPEC
+
+logger = logging.getLogger(__name__)
 
 
 # --- Filename parsing helpers -------------------------------------------------
@@ -97,11 +100,13 @@ def _parse_mtm_daily_sheet(xls: pd.ExcelFile, filename: str, symbol: str | None 
     """Extract the optional Daily MTM sheet."""
 
     if "Daily" not in xls.sheet_names:
+        logger.warning("MTM sheet 'Daily' missing in %s", os.path.basename(filename))
         return pd.DataFrame(columns=["mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"])
 
     try:
         raw = pd.read_excel(xls, sheet_name="Daily", header=None, engine="openpyxl")
     except Exception:
+        logger.warning("Failed reading MTM sheet in %s", os.path.basename(filename))
         return pd.DataFrame(columns=["mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"])
 
     header_idx = None
@@ -197,8 +202,10 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
     sym, interval, strat = parse_filename_meta(str(file_path))
     spec = get_contract_spec(sym)
     # Validate symbol presence; defer unknown symbols to compute with fallback spec.
-    if not sym:
-        raise ValueError(f"Could not parse symbol from filename {file_path.name}")
+    if not sym or sym == "UNKNOWN":
+        raise ValueError(f"Missing or unknown symbol in filename {file_path.name}")
+    if sym not in MARGIN_SPEC:
+        logger.warning("Symbol %s not in MARGIN_SPEC; using fallback margins/BPV", sym)
     trades: list[dict[str, Any]] = []
     last_exit_cum = 0.0
     # Keep the raw cumulative/net profit values for QA/parity; recomputation happens separately.
