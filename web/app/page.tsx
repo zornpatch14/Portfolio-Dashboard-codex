@@ -51,6 +51,7 @@ export default function HomePage() {
   const [plotEnabled, setPlotEnabled] = useState<Record<string, boolean>>({});
   const [plotDrawdownEnabled, setPlotDrawdownEnabled] = useState<Record<string, boolean>>({});
   const [plotMarginEnabled, setPlotMarginEnabled] = useState<Record<string, boolean>>({});
+  const [plotHistogramEnabled, setPlotHistogramEnabled] = useState<Record<string, boolean>>({});
   const apiBase = process.env.NEXT_PUBLIC_API_BASE;
 
   const availableFiles = useMemo(
@@ -436,6 +437,43 @@ export default function HomePage() {
       return next;
     });
   }, [purchasingPowerLines.perFile]);
+
+  const histogramData = useMemo(() => {
+    const files = availableFiles.filter((file) => {
+      if (!activeSelection.files.includes(file)) return false;
+      const meta = deriveFileMeta(file);
+      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
+      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
+      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
+      const contracts = activeSelection.contracts[file] ?? 1;
+      if (contracts === 0) return false;
+      return true;
+    });
+
+    const perFile = files.map((file) => {
+      const mockSelection = { ...activeSelection, name: file, files: [file] };
+      const hist = mockHistogram(mockSelection);
+      return { name: file, buckets: hist.buckets };
+    });
+
+    return perFile;
+  }, [availableFiles, activeSelection, deriveFileMeta]);
+
+  useEffect(() => {
+    const names = new Set<string>();
+    histogramData.forEach((h) => names.add(h.name));
+    names.add('Portfolio');
+    setPlotHistogramEnabled((prev) => {
+      const next = { ...prev };
+      names.forEach((name) => {
+        if (next[name] === undefined) next[name] = true;
+      });
+      Object.keys(next).forEach((key) => {
+        if (!names.has(key)) delete next[key];
+      });
+      return next;
+    });
+  }, [histogramData]);
 
   const correlationQuery = useQuery({
     queryKey: ['correlations', activeSelection.name, activeSelection.files.join(','), corrMode],
@@ -1067,11 +1105,70 @@ export default function HomePage() {
         {activeBadge}
       </div>
       <div className="card" style={{ marginTop: 12 }}>
-        <HistogramChart histogram={histogramQuery.data ?? mockHistogram(activeSelection)} />
-        <div className="text-muted small">
-          Distribution: {histogramQuery.data?.buckets.length ?? 0} buckets
+        <strong>Plot lines</strong>
+        <div className="chips" style={{ marginTop: 10, flexWrap: 'wrap' }}>
+          {[...histogramData.map((h) => h.name), 'Portfolio'].map((name) => {
+            const active = plotHistogramEnabled[name] ?? true;
+            return (
+              <button
+                key={name}
+                type="button"
+                className={`chip ${active ? 'chip-active' : ''}`}
+                onClick={() => setPlotHistogramEnabled((prev) => ({ ...prev, [name]: !active }))}
+              >
+                {name}
+              </button>
+            );
+          })}
         </div>
       </div>
+
+      {(() => {
+        const activeHists = histogramData.filter((h) => plotHistogramEnabled[h.name] !== false);
+        const fallback = histogramQuery.data ?? mockHistogram(activeSelection);
+        const bucketOrder = activeHists[0]?.buckets.map((b) => b.bucket) ?? fallback.buckets.map((b) => b.bucket);
+        const bucketMap = new Map(bucketOrder.map((b) => [b, 0]));
+        activeHists.forEach((hist) => {
+          hist.buckets.forEach((bucket) => {
+            bucketMap.set(bucket.bucket, (bucketMap.get(bucket.bucket) || 0) + bucket.count);
+          });
+        });
+        const parsePct = (label: string) => {
+          const cleaned = label.replace('%', '');
+          const val = Number.parseFloat(cleaned);
+          return Number.isFinite(val) ? val : 0;
+        };
+        const portfolioBuckets = bucketOrder.map((bucket) => ({
+          bucket,
+          count: bucketMap.get(bucket) || 0,
+        }));
+        const portfolioBucketsDollar = bucketOrder.map((bucket) => {
+          const pct = parsePct(bucket);
+          const dollars = (pct / 100) * accountEquity;
+          const label = dollars >= 0 ? `$${dollars.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : `-$${Math.abs(dollars).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+          return { bucket: label, count: bucketMap.get(bucket) || 0 };
+        });
+        return (
+          <div style={{ marginTop: 12, display: 'grid', gap: 12 }}>
+            <div className="card">
+              <strong>Portfolio Histogram ($)</strong>
+              <div className="text-muted small" style={{ marginTop: 4 }}>
+                Portfolio distribution; toggles exclude selected files from the sum.
+              </div>
+              <HistogramChart histogram={{ label: 'Portfolio Histogram ($)', buckets: portfolioBucketsDollar }} />
+              <div className="text-muted small" style={{ marginTop: 8 }}>Buckets: {portfolioBucketsDollar.length}</div>
+            </div>
+            <div className="card">
+              <strong>Portfolio Histogram (%)</strong>
+              <div className="text-muted small" style={{ marginTop: 4 }}>
+                Portfolio return distribution; toggles exclude selected files from the sum.
+              </div>
+              <HistogramChart histogram={{ label: 'Portfolio Histogram (%)', buckets: portfolioBuckets }} />
+              <div className="text-muted small" style={{ marginTop: 8 }}>Buckets: {portfolioBuckets.length}</div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 
