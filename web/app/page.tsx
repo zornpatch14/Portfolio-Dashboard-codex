@@ -7,6 +7,7 @@ import SeriesChart from '../components/SeriesChart';
 import { SelectionList } from '../components/SelectionList';
 import { HistogramChart } from '../components/HistogramChart';
 import { SelectionControls } from '../components/SelectionControls';
+import { CorrelationHeatmap } from '../components/CorrelationHeatmap';
 import {
   fetchCorrelations,
   fetchCta,
@@ -22,7 +23,6 @@ import {
   SeriesKind,
 } from '../lib/api';
 import { loadSampleSelections, Selection } from '../lib/selections';
-import { CorrelationHeatmap } from '../components/CorrelationHeatmap';
 
 const selections = loadSampleSelections();
 const tabs = [
@@ -143,19 +143,19 @@ export default function HomePage() {
       <div className="metric-cards" style={{ marginTop: 14 }}>
         <div className="metric-card">
           <span className="text-muted small">Net Profit (sum)</span>
-          <strong>{metricsSummary ? metricsSummary.netProfit.toLocaleString() : "--"}</strong>
+          <strong>{metricsSummary ? `$${metricsSummary.netProfit.toLocaleString()}` : '--'}</strong>
         </div>
         <div className="metric-card">
           <span className="text-muted small">Drawdown (sum)</span>
-          <strong>{metricsSummary ? metricsSummary.drawdown.toLocaleString() : "--"}</strong>
+          <strong>{metricsSummary ? `$${metricsSummary.drawdown.toLocaleString()}` : '--'}</strong>
         </div>
         <div className="metric-card">
           <span className="text-muted small">Avg Trades</span>
-          <strong>{metricsSummary ? metricsSummary.avgTrades : "--"}</strong>
+          <strong>{metricsSummary ? metricsSummary.avgTrades : '--'}</strong>
         </div>
         <div className="metric-card">
           <span className="text-muted small">Avg Win %</span>
-          <strong>{metricsSummary ? `${metricsSummary.avgWin.toFixed(1)}%` : "--"}</strong>
+          <strong>{metricsSummary ? `${metricsSummary.avgWin.toFixed(1)}%` : '--'}</strong>
         </div>
         <div className="metric-card">
           <span className="text-muted small">Files</span>
@@ -169,50 +169,64 @@ export default function HomePage() {
 
       <div className="charts-grid" style={{ marginTop: 18 }}>
         <div className="card">
-          <SeriesChart title="Equity Curve" series={equityQuery.data -- mockSeries(activeSelection, 'equity')} color="#4cc3ff" />
-          <div className="text-muted small">Points: {equityQuery.data-.downsampledCount -- equityQuery.data-.points.length}</div>
+          <SeriesChart title="Equity Curve" series={equityQuery.data ?? mockSeries(activeSelection, 'equity')} color="#4cc3ff" />
+          <div className="text-muted small">
+            Points: {equityQuery.data?.downsampledCount ?? equityQuery.data?.points.length ?? 0}
+          </div>
         </div>
         <div className="card">
           <SeriesChart
             title="Percent Equity"
-            series={equityPctQuery.data -- mockSeries(activeSelection, 'equityPercent')}
+            series={equityPctQuery.data ?? mockSeries(activeSelection, 'equityPercent')}
             color="#8fe3c7"
           />
-          <div className="text-muted small">Points: {equityPctQuery.data-.downsampledCount -- equityPctQuery.data-.points.length}</div>
+          <div className="text-muted small">
+            Points: {equityPctQuery.data?.downsampledCount ?? equityPctQuery.data?.points.length ?? 0}
+          </div>
         </div>
         <div className="card">
           <SeriesChart
             title="Drawdown"
-            series={drawdownQuery.data -- mockSeries(activeSelection, 'drawdown')}
+            series={drawdownQuery.data ?? mockSeries(activeSelection, 'drawdown')}
             color="#ff8f6b"
           />
-          <div className="text-muted small">Points: {drawdownQuery.data-.downsampledCount -- drawdownQuery.data-.points.length}</div>
+          <div className="text-muted small">
+            Points: {drawdownQuery.data?.downsampledCount ?? drawdownQuery.data?.points.length ?? 0}
+          </div>
         </div>
         <div className="card">
           <SeriesChart
             title="Intraday Drawdown"
-            series={intradayDdQuery.data -- mockSeries(activeSelection, 'intradayDrawdown')}
+            series={intradayDdQuery.data ?? mockSeries(activeSelection, 'intradayDrawdown')}
             color="#f4c95d"
           />
-          <div className="text-muted small">Points: {intradayDdQuery.data-.downsampledCount -- intradayDdQuery.data-.points.length}</div>
+          <div className="text-muted small">
+            Points: {intradayDdQuery.data?.downsampledCount ?? intradayDdQuery.data?.points.length ?? 0}
+          </div>
         </div>
         <div className="card">
-          <SeriesChart title="Net Position" series={netposQuery.data -- mockSeries(activeSelection, 'netpos')} color="#9f8bff" />
-          <div className="text-muted small">Points: {netposQuery.data-.downsampledCount -- netposQuery.data-.points.length}</div>
+          <SeriesChart title="Net Position" series={netposQuery.data ?? mockSeries(activeSelection, 'netpos')} color="#9f8bff" />
+          <div className="text-muted small">
+            Points: {netposQuery.data?.downsampledCount ?? netposQuery.data?.points.length ?? 0}
+          </div>
         </div>
         <div className="card">
-          <SeriesChart title="Margin Usage" series={marginQuery.data -- mockSeries(activeSelection, 'margin')} color="#54ffd0" />
-          <div className="text-muted small">Points: {marginQuery.data-.downsampledCount -- marginQuery.data-.points.length}</div>
+          <SeriesChart title="Margin Usage" series={marginQuery.data ?? mockSeries(activeSelection, 'margin')} color="#54ffd0" />
+          <div className="text-muted small">
+            Points: {marginQuery.data?.downsampledCount ?? marginQuery.data?.points.length ?? 0}
+          </div>
         </div>
         <div className="card">
-          <HistogramChart histogram={histogramQuery.data -- mockHistogram(activeSelection)} />
-          <div className="text-muted small">Distribution: {histogramQuery.data-.buckets.length -- 0} buckets</div>
+          <HistogramChart histogram={histogramQuery.data ?? mockHistogram(activeSelection)} />
+          <div className="text-muted small">
+            Distribution: {histogramQuery.data?.buckets.length ?? 0} buckets
+          </div>
         </div>
       </div>
 
       <div style={{ marginTop: 18 }}>
         <h3 className="section-title">Per-file metrics</h3>
-        {metricsQuery.data && metricsQuery.data.length - (
+        {metricsQuery.data && metricsQuery.data.length ? (
           <MetricsGrid rows={metricsQuery.data} />
         ) : (
           <div className="placeholder-text">No metrics returned yet.</div>
@@ -253,7 +267,7 @@ export default function HomePage() {
             type="number"
             min={5}
             step={1}
-            value={corrMode === 'slope' - 20 : ''}
+            value={corrMode === 'slope' ? 20 : ''}
             placeholder="20"
             disabled={corrMode !== 'slope'}
           />
@@ -261,10 +275,10 @@ export default function HomePage() {
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
-        <CorrelationHeatmap data={correlationQuery.data -- mockCorrelations(activeSelection, corrMode)} />
+        <CorrelationHeatmap data={correlationQuery.data ?? mockCorrelations(activeSelection, corrMode)} />
       </div>
       <div className="text-muted small" style={{ marginTop: 10 }}>
-        {correlationQuery.data-.notes.map((note) => (
+        {correlationQuery.data?.notes.map((note) => (
           <div key={note}>- {note}</div>
         ))}
       </div>
@@ -365,7 +379,7 @@ export default function HomePage() {
               </tr>
             </thead>
             <tbody>
-              {optimizerQuery.data-.contracts.map((row) => (
+              {optimizerQuery.data?.contracts.map((row) => (
                 <tr key={row.asset}>
                   <td>{row.asset}</td>
                   <td>{row.contracts}</td>
@@ -390,7 +404,7 @@ export default function HomePage() {
             </tr>
           </thead>
           <tbody>
-            {optimizerQuery.data-.weights.map((row) => (
+            {optimizerQuery.data?.weights.map((row) => (
               <tr key={row.asset}>
                 <td>{row.asset}</td>
                 <td>{row.weight}</td>
@@ -457,7 +471,7 @@ export default function HomePage() {
               </tr>
             </thead>
             <tbody>
-              {ctaQuery.data-.monthly.map((row) => (
+              {ctaQuery.data?.monthly.map((row) => (
                 <tr key={row.month}>
                   <td>{row.month}</td>
                   <td>{row.additive}%</td>
@@ -478,7 +492,7 @@ export default function HomePage() {
               </tr>
             </thead>
             <tbody>
-              {ctaQuery.data-.annual.map((row) => (
+              {ctaQuery.data?.annual.map((row) => (
                 <tr key={row.year}>
                   <td>{row.year}</td>
                   <td>{row.additive}%</td>
@@ -540,9 +554,7 @@ export default function HomePage() {
                   onClick={() =>
                     setActiveSelection((prev) => ({
                       ...prev,
-                      files: active
-                        - prev.files.filter((f) => f !== file)
-                        : [...prev.files, file],
+                      files: active ? prev.files.filter((f) => f !== file) : [...prev.files, file],
                     }))
                   }
                 >
@@ -565,7 +577,12 @@ export default function HomePage() {
               onChange={(event) => setIncludeDownsample(event.target.checked)}
             />
             <label className="field-label" htmlFor="format" style={{ margin: 0 }}>Export format</label>
-            <select id="format" className="input" value={exportFormat} onChange={(event) => setExportFormat(event.target.value as 'csv' | 'parquet')}>
+            <select
+              id="format"
+              className="input"
+              value={exportFormat}
+              onChange={(event) => setExportFormat(event.target.value as 'csv' | 'parquet')}
+            >
               <option value="csv">CSV</option>
               <option value="parquet">Parquet</option>
             </select>
@@ -652,7 +669,7 @@ export default function HomePage() {
             <div className="text-muted small">Portfolio Dashboard</div>
             <h1 style={{ margin: '6px 0 8px 0' }}>Selection driver</h1>
             <div className="text-muted small">
-              {apiBase - (
+              {apiBase ? (
                 <span>
                   <span className="status-dot" /> API base configured: {apiBase}
                 </span>
@@ -681,7 +698,7 @@ export default function HomePage() {
             }}
             disabled={busy}
           >
-            {busy ? "Refreshing..." : "Refresh" }
+            {busy ? 'Refreshing...' : 'Refresh'}
           </button>
         </div>
 
