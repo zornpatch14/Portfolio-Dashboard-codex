@@ -9,9 +9,7 @@ from typing import Iterable, List
 import pandas as pd
 import polars as pl
 
-
-DEFAULT_CONTRACT_MULTIPLIER = float(os.getenv("API_CONTRACT_MULTIPLIER", 5))
-DEFAULT_MARGIN_PER_CONTRACT = float(os.getenv("API_MARGIN_PER_CONTRACT", 12000))
+from api.app.constants import DEFAULT_CONTRACT_MULTIPLIER, get_contract_spec
 
 
 @dataclass
@@ -46,9 +44,10 @@ def _pairwise(iterable: Iterable[pd.Series]) -> Iterable[tuple[pd.Series, pd.Ser
 
 
 def _compute_net_profit(entry_price: float, exit_price: float, direction: str, contracts: int) -> float:
+    spec = get_contract_spec("")  # placeholder; overridden per-call when symbol known
     direction_lower = direction.lower()
     sign = 1 if direction_lower == "buy" else -1
-    return (exit_price - entry_price) * DEFAULT_CONTRACT_MULTIPLIER * contracts * sign
+    return (exit_price - entry_price) * spec.big_point_value * contracts * sign
 
 
 def load_trade_file(path: Path) -> LoadedTrades:
