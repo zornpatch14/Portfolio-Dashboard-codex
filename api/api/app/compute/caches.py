@@ -39,6 +39,19 @@ class PerFileCache:
     def load_trades(self, path: Path) -> LoadedTrades:
         return load_trade_file(path)
 
+    def load_mtm(self, trades_path: Path, file_id: str) -> pl.DataFrame:
+        """Load MTM parquet if available (derived from trades path)."""
+
+        # Expect layout: .../parquet/trades/<file_id>.parquet -> mtm at .../parquet/mtm/<file_id>.parquet
+        mtm_dir = trades_path.parent.parent / "mtm"
+        mtm_path = mtm_dir / f"{file_id}.parquet"
+        if mtm_path.exists():
+            try:
+                return pl.read_parquet(mtm_path)
+            except Exception:
+                return pl.DataFrame({"mtm_date": [], "mtm_net_profit": [], "mtm_session_start": [], "mtm_session_end": []})
+        return pl.DataFrame({"mtm_date": [], "mtm_net_profit": [], "mtm_session_start": [], "mtm_session_end": []})
+
     def equity_curve(self, path: Path) -> pl.DataFrame:
         return self._get_or_build(path, "equity", self._compute_equity)
 
@@ -110,7 +123,59 @@ class PerFileCache:
 
     # ---------- computations ----------
     def _compute_equity(self, loaded: LoadedTrades) -> pl.DataFrame:
-        trades = loaded.trades.sort("exit_time")
+        # Try MTM-driven equity first
+        mtm_df = self.load_mtm(loaded.path, loaded.file_id)
+        if not mtm_df.is_empty():
+            # Stepwise equity: open at session start, close at session end with MTM P&L applied.
+            mtm_df = mtm_df.sort("mtm_date")
+            equity_points = []
+            running = self.starting_equity
+            for row in mtm_df.iter_rows(named=True):
+                session_start = row.get("mtm_session_start") or row["mtm_date"]
+                session_end = row.get("mtm_session_end") or row["mtm_date"]
+                equity_points.append({"timestamp": session_start, "equity": running})
+                running = running + float(row["mtm_net_profit"])
+                equity_points.append({"timestamp": session_end, "equity": running})
+
+            equity_df = pl.DataFrame(equity_points).sort("timestamp")
+
+            # Optional snap to trade exits: align cumulative trade P&L on exit sessions.
+            trades = loaded.trades.sort(["exit_time", "entry_time", "trade_no"])
+            if not trades.is_empty():
+                cum_trade = trades["net_profit"].cum_sum()
+                trades = trades.with_columns(cum_trade.alias("cum_trade_pl"))
+                # Snap by matching exit_date to mtm_date.
+                for row in trades.iter_rows(named=True):
+                    exit_time = row["exit_time"]
+                    if exit_time is None:
+                        continue
+                    exit_date = pl.Series([exit_time]).dt.date()[0]
+                    match = mtm_df.filter(pl.col("mtm_date") == exit_date)
+                    if match.is_empty():
+                        continue
+                    # Find the session end point index
+                    session_end = match["mtm_session_end"][0]
+                    idx = equity_df.get_column("timestamp").to_list().index(session_end) if session_end in equity_df["timestamp"].to_list() else None
+                    if idx is not None:
+                        equity_df = equity_df.with_row_count()
+                        target_idx = equity_df.filter(pl.col("timestamp") == session_end)["row_nr"][0]
+                        delta = row["cum_trade_pl"] + self.starting_equity - equity_df.filter(pl.col("timestamp") == session_end)["equity"][0]
+                        if delta != 0:
+                            equity_df = equity_df.with_columns(
+                                pl.when(pl.col("row_nr") >= target_idx)
+                                .then(pl.col("equity") + delta)
+                                .otherwise(pl.col("equity"))
+                                .alias("equity")
+                            ).drop("row_nr")
+                        else:
+                            equity_df = equity_df.drop("row_nr")
+                    else:
+                        continue
+
+            return equity_df
+
+        # Fallback: trade-based equity
+        trades = loaded.trades.sort(["exit_time", "entry_time", "trade_no"])
         cumulative = trades["net_profit"].cum_sum()
         equity = cumulative + self.starting_equity
         return pl.DataFrame({"timestamp": trades["exit_time"], "equity": equity})
