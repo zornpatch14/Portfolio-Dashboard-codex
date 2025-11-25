@@ -186,6 +186,53 @@ class PerFileCache:
         return pl.DataFrame({"timestamp": equity_df["timestamp"], "percent_equity": percent})
 
     def _compute_daily_returns(self, loaded: LoadedTrades) -> pl.DataFrame:
+        mtm_df = self.load_mtm(loaded.path, loaded.file_id)
+
+        # Use MTM sessions when available.
+        if not mtm_df.is_empty():
+            mtm_df = mtm_df.sort("mtm_date")
+            _, intervals = self._netpos_intervals(loaded)
+            rows = []
+            for row in mtm_df.iter_rows(named=True):
+                session_start = row.get("mtm_session_start") or row["mtm_date"]
+                session_end = row.get("mtm_session_end") or row["mtm_date"]
+                pnl = float(row["mtm_net_profit"])
+                # Overlap intervals with session to compute avg open-position margin.
+                overlap = intervals.filter(
+                    (pl.col("start") < session_end) & (pl.col("end") > session_start)
+                )
+                if overlap.is_empty():
+                    avg_capital = 0.0
+                else:
+                    caps = []
+                    mins = []
+                    for iv in overlap.iter_rows(named=True):
+                        s = max(iv["start"], session_start)
+                        e = min(iv["end"], session_end)
+                        if s >= e:
+                            continue
+                        minutes = (e - s).total_seconds() / 60.0
+                        if iv["net_position"] == 0:
+                            continue
+                        caps.append(iv["margin_used"])
+                        mins.append(minutes)
+                    if caps and mins and sum(mins) > 0:
+                        # Weighted average by minutes open.
+                        avg_capital = sum(c * m for c, m in zip(caps, mins)) / sum(mins)
+                    else:
+                        avg_capital = 0.0
+                daily_ret = (pnl / avg_capital) if avg_capital > 0 else 0.0
+                rows.append(
+                    {
+                        "date": row["mtm_date"],
+                        "pnl": pnl,
+                        "capital": avg_capital,
+                        "daily_return": daily_ret,
+                    }
+                )
+            return pl.DataFrame(rows) if rows else pl.DataFrame({"date": [], "pnl": [], "capital": [], "daily_return": []})
+
+        # Fallback: group by exit date if MTM absent.
         trades = loaded.trades.with_columns(pl.col("exit_time").dt.date().alias("date"))
         margin_value = self.margin_per_contract or float(trades["margin_per_contract"].max())
         grouped = trades.group_by("date").agg(
