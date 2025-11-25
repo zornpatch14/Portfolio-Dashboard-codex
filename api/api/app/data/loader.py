@@ -9,7 +9,7 @@ from typing import Iterable, List
 import pandas as pd
 import polars as pl
 
-from api.app.constants import DEFAULT_CONTRACT_MULTIPLIER, get_contract_spec
+from api.app.constants import DEFAULT_CONTRACT_MULTIPLIER, DEFAULT_MARGIN_PER_CONTRACT, get_contract_spec
 
 
 @dataclass

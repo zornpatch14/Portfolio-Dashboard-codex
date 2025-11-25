@@ -195,6 +195,7 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
     exit_types = {"Sell", "Buy to Cover"}
 
     sym, interval, strat = parse_filename_meta(str(file_path))
+    spec = get_contract_spec(sym)
     # Validate symbol presence; defer unknown symbols to compute with fallback spec.
     if not sym:
         raise ValueError(f"Could not parse symbol from filename {file_path.name}")
@@ -258,7 +259,6 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
             direction_entry = str(ent.get("entry_type") or "").lower()
             is_long = direction_entry == "buy"
             sign = 1 if is_long else -1
-            spec = get_contract_spec(sym)
             price_diff = (exit_price - entry_price) * sign
             fees = float(ent.get("entry_commission") or 0.0) + comm + float(ent.get("entry_slippage") or 0.0) + slip
             recomputed_net = (price_diff * spec.big_point_value * abs(contracts) * DEFAULT_CONTRACT_MULTIPLIER) - fees
@@ -310,6 +310,8 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
                     "net_profit_raw": float(ent.get("net_profit_raw")) if not math.isnan(ent.get("net_profit_raw", math.nan)) else float(exit_net_profit_raw) if not math.isnan(exit_net_profit_raw) else np.nan,
                     "pct_profit_raw": float(pct_raw) if pct_raw is not None else np.nan,
                     "notional_exposure": float(notional) if notional is not None else np.nan,
+                    "margin_per_contract": float(spec.initial_margin),
+                    "big_point_value": float(spec.big_point_value),
                 }
             )
 
@@ -338,6 +340,8 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
                 "gross_profit": np.nan,
                 "pct_profit_raw": float(ent.get("pct_profit_raw")) if not math.isnan(ent.get("pct_profit_raw", np.nan)) else np.nan,
                 "notional_exposure": np.nan,
+                "margin_per_contract": float(spec.initial_margin),
+                "big_point_value": float(spec.big_point_value),
             }
         )
 
@@ -360,6 +364,8 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
             "pct_profit_raw",
             "notional_exposure",
             "net_profit_raw",
+            "margin_per_contract",
+            "big_point_value",
         ]
         for c in num_cols:
             if c in trades_df.columns:
