@@ -26,26 +26,23 @@ import { loadSampleSelections, Selection } from '../lib/selections';
 
 const selections = loadSampleSelections();
 const tabs = [
+  { key: 'load-trade-lists', label: 'Load Trade Lists' },
   { key: 'equity-curves', label: 'Equity Curves' },
+  { key: 'portfolio-drawdown', label: 'Portfolio Drawdown' },
+  { key: 'margin', label: 'Margin' },
+  { key: 'trade-pl-histogram', label: 'Trade P/L Histogram' },
   { key: 'correlations', label: 'Correlations' },
   { key: 'riskfolio', label: 'Riskfolio' },
   { key: 'cta-report', label: 'CTA Report' },
-  { key: 'load-trade-lists', label: 'Load Trade Lists' },
-  { key: 'settings', label: 'Settings' },
   { key: 'metrics', label: 'Metrics' },
-  { key: 'portfolio-drawdown', label: 'Portfolio Drawdown' },
-  { key: 'intraday-drawdown', label: 'Intraday Drawdown' },
-  { key: 'margin', label: 'Margin' },
-  { key: 'trade-pl-histogram', label: 'Trade P/L Histogram' },
   { key: 'inverse-volatility', label: 'Inverse Volatility' },
-  { key: 'allocator', label: 'Allocator' },
 ] as const;
 
 type TabKey = (typeof tabs)[number]['key'];
 
 export default function HomePage() {
   const [activeSelection, setActiveSelection] = useState<Selection>(selections[0]);
-  const [activeTab, setActiveTab] = useState<TabKey>('equity-curves');
+  const [activeTab, setActiveTab] = useState<TabKey>('load-trade-lists');
   const [corrMode, setCorrMode] = useState('drawdown_pct');
   const [accountEquity, setAccountEquity] = useState(50000);
   const [includeDownsample, setIncludeDownsample] = useState(true);
@@ -666,7 +663,7 @@ export default function HomePage() {
         account equity, spike toggle, downsample/export switches, and file metadata preview.
       </p>
 
-      <div className="card">
+      <div className="card" style={{ marginTop: 14 }}>
         <div className="upload-area">Drag & drop or select .xlsx files</div>
         <div className="text-muted small" style={{ marginTop: 6 }}>Uploads mirror Dash (multiple files, persistent list).</div>
       </div>
@@ -781,6 +778,26 @@ export default function HomePage() {
           Acts as the Dash helper showing parsed symbol/interval/strategy/date metadata per file.
         </div>
       </div>
+
+      <div className="card" style={{ marginTop: 18, marginBottom: 12 }}>
+        <div className="flex gap-md" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div className="text-muted small">Active selection</div>
+            <strong>{activeSelection.name}</strong>
+            <div className="text-muted small" style={{ marginTop: 6 }}>
+              {activeSelection.files.join(', ')}
+            </div>
+          </div>
+          <div className="badge">{activeSelection.files.length} files</div>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <SelectionList selections={selections} active={activeSelection} onSelect={setActiveSelection} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <SelectionControls selection={activeSelection} availableFiles={availableFiles} onChange={setActiveSelection} />
+      </div>
     </div>
   );
 
@@ -790,24 +807,20 @@ export default function HomePage() {
     if (activeTab === 'riskfolio') return renderOptimizer();
     if (activeTab === 'cta-report') return renderCta();
     if (activeTab === 'load-trade-lists') return renderIngest();
-    if (activeTab === 'settings') return renderSettings();
     if (activeTab === 'metrics') return renderMetrics();
     if (activeTab === 'portfolio-drawdown') return renderPortfolioDrawdown();
-    if (activeTab === 'intraday-drawdown') return renderIntradayDrawdown();
     if (activeTab === 'margin') return renderMargin();
     if (activeTab === 'trade-pl-histogram') return renderHistogram();
     if (activeTab === 'inverse-volatility') return renderInverseVolatility();
-    if (activeTab === 'allocator') return renderAllocator();
     return renderEquityCurves();
   };
 
   return (
-    <div className="two-column">
-      <div className="panel" style={{ position: 'sticky', top: 16 }}>
+    <div className="page">
+      <div className="panel" style={{ marginBottom: 12 }}>
         <div className="flex gap-sm" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div className="text-muted small">Portfolio Dashboard</div>
-            <h1 style={{ margin: '6px 0 8px 0' }}>Selection driver</h1>
+            <h1 style={{ margin: '6px 0 8px 0' }}>Futures Portfolio Dashboard</h1>
             <div className="text-muted small">
               {apiBase ? (
                 <span>
@@ -840,29 +853,6 @@ export default function HomePage() {
           >
             {busy ? 'Refreshing...' : 'Refresh'}
           </button>
-        </div>
-
-        <div style={{ marginTop: 18 }}>
-          <div className="card" style={{ marginBottom: 16 }}>
-            <div className="flex gap-md" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
-              <div>
-                <div className="text-muted small">Active selection</div>
-                <strong>{activeSelection.name}</strong>
-              </div>
-              <div className="badge">{activeSelection.files.length} files</div>
-            </div>
-            <div className="text-muted small" style={{ marginTop: 8 }}>
-              {activeSelection.files.join(', ')}
-            </div>
-          </div>
-          <SelectionList selections={selections} active={activeSelection} onSelect={setActiveSelection} />
-          <div style={{ marginTop: 12 }}>
-            <SelectionControls
-              selection={activeSelection}
-              availableFiles={availableFiles}
-              onChange={setActiveSelection}
-            />
-          </div>
         </div>
       </div>
 

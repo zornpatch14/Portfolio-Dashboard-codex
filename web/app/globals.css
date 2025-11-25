@@ -118,6 +118,11 @@ main {
   gap: 20px;
   align-items: start;
 }
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
 
 .charts-grid {
   display: grid;
