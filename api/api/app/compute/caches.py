@@ -7,6 +7,7 @@ from typing import Callable, Iterable
 
 import polars as pl
 
+from api.app.constants import DEFAULT_MARGIN_PER_CONTRACT
 from api.app.data.loader import LoadedTrades, load_trade_file
 
 
@@ -61,13 +62,21 @@ class PerFileCache:
     def daily_returns(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
         return self._get_or_build(path, "daily_returns", lambda loaded: self._compute_daily_returns(loaded, contract_multiplier, margin_override))
 
-    def net_position(self, path: Path, margin_override: float | None = None) -> pl.DataFrame:
-        points, _ = self._netpos_intervals(self.load_trades(path), margin_override=margin_override)
-        return points
+    def net_position(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
+        """Return point-in-time net position series; cache when no overrides applied."""
 
-    def margin_usage(self, path: Path, margin_override: float | None = None) -> pl.DataFrame:
-        _, intervals = self._netpos_intervals(self.load_trades(path), margin_override=margin_override)
-        return intervals.select(pl.col("start").alias("timestamp"), pl.col("margin_used"))
+        if contract_multiplier is None and margin_override is None:
+            return self._get_or_build(path, "netpos", lambda loaded: self._compute_net_positions(loaded, None, None))
+        loaded = self.load_trades(path)
+        return self._compute_net_positions(loaded, contract_multiplier, margin_override)
+
+    def margin_usage(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
+        """Return margin usage intervals (timestamp=interval start) with caching when no overrides."""
+
+        if contract_multiplier is None and margin_override is None:
+            return self._get_or_build(path, "margin", lambda loaded: self._compute_margin(loaded, None, None))
+        loaded = self.load_trades(path)
+        return self._compute_margin(loaded, contract_multiplier, margin_override)
 
     def spike_overlay(self, path: Path) -> pl.DataFrame:
         return self._get_or_build(path, "spikes", self._compute_spikes)
@@ -253,14 +262,15 @@ class PerFileCache:
         daily_return = pl.when(capital > 0).then(grouped["pnl"] / capital).otherwise(0)
         return grouped.drop("contracts").with_columns(capital=capital, daily_return=daily_return)
 
-    def _compute_net_positions(self, loaded: LoadedTrades) -> pl.DataFrame:
-        return self._netpos_intervals(loaded)[0]
+    def _compute_net_positions(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
+        return self._netpos_intervals(loaded, contract_multiplier=contract_multiplier, margin_override=margin_override)[0]
 
-    def _compute_margin(self, loaded: LoadedTrades) -> pl.DataFrame:
-        _, intervals = self._netpos_intervals(loaded)
+    def _compute_margin(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
+        _, intervals = self._netpos_intervals(loaded, contract_multiplier=contract_multiplier, margin_override=margin_override)
         return intervals.select(
             pl.col("start").alias("timestamp"),
             pl.col("margin_used"),
+            pl.col("symbol"),
         )
 
     def _compute_spikes(self, loaded: LoadedTrades) -> pl.DataFrame:
@@ -294,6 +304,7 @@ class PerFileCache:
     def _netpos_intervals(
         self,
         loaded: LoadedTrades,
+        contract_multiplier: float | None = None,
         margin_override: float | None = None,
         trades_override: pl.DataFrame | None = None,
     ) -> tuple[pl.DataFrame, pl.DataFrame]:
@@ -305,47 +316,60 @@ class PerFileCache:
         """
 
         trades = trades_override if trades_override is not None else loaded.trades
+        cmult = contract_multiplier if contract_multiplier is not None else self.default_contract_multiplier
+        if trades_override is None:
+            trades = self._apply_contract_multiplier(trades, cmult)
+
         if trades.is_empty():
             empty_points = pl.DataFrame({"timestamp": [], "net_position": []})
             empty_intervals = pl.DataFrame({"start": [], "end": [], "symbol": [], "net_position": [], "margin_used": []})
             return empty_points, empty_intervals
 
-        # Signed events from entry/exit.
+        # Deterministic ordering for event generation.
+        sort_keys = [key for key in ["exit_time", "entry_time", "trade_no"] if key in trades.columns]
+        trades = trades.sort(sort_keys) if sort_keys else trades
+
         events = []
         for row in trades.iter_rows(named=True):
             direction = str(row.get("direction", "")).lower()
-            contracts = float(row["contracts"])
+            contracts = float(row.get("contracts") or 0.0)
             is_long = direction in {"buy", "long", "buy to open", "buy to cover"}
             signed = contracts if is_long else -contracts
-            events.append((row["entry_time"], signed, row.get("Symbol") or row.get("symbol")))
-            events.append((row["exit_time"], -signed, row.get("Symbol") or row.get("symbol")))
+            sym = row.get("Symbol") or row.get("symbol")
+            trade_no = row.get("trade_no") or 0
+            if row.get("entry_time") is not None:
+                events.append((row["entry_time"], signed, sym, trade_no))
+            if row.get("exit_time") is not None:
+                events.append((row["exit_time"], -signed, sym, trade_no))
 
         if not events:
             empty_points = pl.DataFrame({"timestamp": [], "net_position": []})
             empty_intervals = pl.DataFrame({"start": [], "end": [], "symbol": [], "net_position": [], "margin_used": []})
             return empty_points, empty_intervals
 
-        # Sort by time, then stabilize by trade number if needed.
-        events.sort(key=lambda tup: (tup[0],))
-        timestamps, deltas, symbols = zip(*events)
+        # Sort by time with trade_no tie-breaker.
+        events.sort(key=lambda tup: (tup[0], tup[3]))
+        timestamps, deltas, symbols, _ = zip(*events)
         cumulative = pl.Series(deltas).cum_sum()
         points_df = pl.DataFrame({"timestamp": pl.Series(timestamps), "net_position": cumulative})
 
-        # Build intervals as piecewise constant segments between change points.
         starts = list(timestamps)
         ends = list(timestamps[1:]) + [timestamps[-1]]
         netpos_values = list(cumulative)
-        sym = symbols[-1] if symbols else None
+        symbol_values = list(symbols)
 
-        # Margin per contract: prefer override; else from trades; else 0.
-        margin_value = margin_override or self.margin_per_contract or float(trades["margin_per_contract"].max())
+        # Margin per contract: prefer override; else from trades; else default.
+        margin_value = margin_override or self.margin_per_contract
+        if margin_value is None:
+            margin_value = float(trades["margin_per_contract"].max()) if "margin_per_contract" in trades.columns else DEFAULT_MARGIN_PER_CONTRACT
+
         interval_df = pl.DataFrame(
             {
                 "start": starts,
                 "end": ends,
-                "symbol": [sym] * len(starts),
+                "symbol": symbol_values,
                 "net_position": netpos_values,
-                "margin_used": [abs(v) * margin_value for v in netpos_values],
+                "margin_used": [abs(v) * float(margin_value) for v in netpos_values],
             }
         )
         return points_df, interval_df
