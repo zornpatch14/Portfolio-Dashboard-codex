@@ -57,55 +57,60 @@ class PerFileCache:
                 return pl.DataFrame({"mtm_date": [], "mtm_net_profit": [], "mtm_session_start": [], "mtm_session_end": []})
         return pl.DataFrame({"mtm_date": [], "mtm_net_profit": [], "mtm_session_start": [], "mtm_session_end": []})
 
-    def equity_curve(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
+    def equity_curve(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
         return self._get_or_build(
             path,
             "equity",
-            lambda loaded: self._compute_equity(loaded, contract_multiplier, margin_override),
+            lambda loaded: self._compute_equity(loaded, contract_multiplier, margin_override, direction),
             contract_multiplier,
             margin_override,
+            direction,
         )
 
-    def daily_returns(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
+    def daily_returns(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
         return self._get_or_build(
             path,
             "daily_returns",
-            lambda loaded: self._compute_daily_returns(loaded, contract_multiplier, margin_override),
+            lambda loaded: self._compute_daily_returns(loaded, contract_multiplier, margin_override, direction),
             contract_multiplier,
             margin_override,
+            direction,
         )
 
-    def net_position(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
+    def net_position(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
         """Return point-in-time net position series; cache intervals when no overrides applied."""
 
         intervals = self._get_or_build(
             path,
             "intervals",
-            lambda loaded: self._netpos_intervals(loaded, contract_multiplier, margin_override, None)[1],
+            lambda loaded: self._netpos_intervals(loaded, contract_multiplier, margin_override, None, None, direction)[1],
             contract_multiplier,
             margin_override,
+            direction,
         )
         return intervals.select(pl.col("start").alias("timestamp"), pl.col("net_position"))
 
-    def margin_usage(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
+    def margin_usage(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
         """Return margin usage intervals (timestamp=interval start) with caching when no overrides."""
 
         intervals = self._get_or_build(
             path,
             "intervals",
-            lambda loaded: self._netpos_intervals(loaded, contract_multiplier, margin_override, None)[1],
+            lambda loaded: self._netpos_intervals(loaded, contract_multiplier, margin_override, None, None, direction)[1],
             contract_multiplier,
             margin_override,
+            direction,
         )
         return intervals.select(pl.col("start").alias("timestamp"), pl.col("margin_used"), pl.col("symbol"))
 
-    def spike_overlay(self, path: Path, contract_multiplier: float | None = None) -> pl.DataFrame:
+    def spike_overlay(self, path: Path, contract_multiplier: float | None = None, direction: str | None = None) -> pl.DataFrame:
         return self._get_or_build(
             path,
             "spikes",
-            lambda loaded: self._compute_spikes(loaded, contract_multiplier),
+            lambda loaded: self._compute_spikes(loaded, contract_multiplier, direction),
             contract_multiplier,
             None,
+            direction,
         )
 
     def bundle(self, path: Path) -> SeriesBundle:
@@ -124,11 +129,13 @@ class PerFileCache:
         artifact: str,
         contract_multiplier: float | None = None,
         margin_override: float | None = None,
+        direction: str | None = None,
     ) -> Path:
         version = f"_{self.data_version}" if self.data_version else ""
         cm = f"cm{contract_multiplier}" if contract_multiplier is not None else "cm_default"
         marg = f"m{margin_override}" if margin_override is not None else "m_default"
-        return self.storage_dir / f"{file_id}{version}_{cm}_{marg}_{artifact}.parquet"
+        dir_component = f"dir_{direction.lower()}" if direction else "dir_all"
+        return self.storage_dir / f"{file_id}{version}_{cm}_{marg}_{dir_component}_{artifact}.parquet"
 
     def _get_or_build(
         self,
@@ -137,9 +144,10 @@ class PerFileCache:
         builder: Callable[[LoadedTrades], pl.DataFrame],
         contract_multiplier: float | None = None,
         margin_override: float | None = None,
+        direction: str | None = None,
     ) -> pl.DataFrame:
         loaded = self.load_trades(path)
-        target = self._artifact_path(loaded.file_id, artifact, contract_multiplier, margin_override)
+        target = self._artifact_path(loaded.file_id, artifact, contract_multiplier, margin_override, direction)
         if target.exists():
             return pl.read_parquet(target)
 
@@ -178,10 +186,29 @@ class PerFileCache:
             return trades
         return trades.with_columns(*updates)
 
+    @staticmethod
+    def _filter_by_direction(trades: pl.DataFrame, direction: str | None) -> pl.DataFrame:
+        """Filter trades to the requested direction ('long' or 'short')."""
+
+        if direction is None:
+            return trades
+        dir_norm = direction.lower()
+        if "direction" not in trades.columns:
+            return trades
+        dir_col = pl.col("direction").cast(pl.Utf8).str.to_lowercase()
+        if dir_norm == "long":
+            mask = dir_col.is_in(["long", "buy", "buy to open", "buy to cover"])
+        elif dir_norm == "short":
+            mask = dir_col.is_in(["short", "sell short", "sell", "sell to open", "sell to cover"])
+        else:
+            return trades
+        return trades.filter(mask)
+
     # ---------- computations ----------
-    def _compute_equity(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
+    def _compute_equity(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
         cmult = contract_multiplier if contract_multiplier is not None else self.default_contract_multiplier
-        trades = self._apply_contract_multiplier(loaded.trades, cmult)
+        trades = self._filter_by_direction(loaded.trades, direction)
+        trades = self._apply_contract_multiplier(trades, cmult)
         # Try MTM-driven equity first
         mtm_df = self.load_mtm(loaded.path, loaded.file_id)
         if not mtm_df.is_empty():
@@ -239,9 +266,10 @@ class PerFileCache:
         equity = cumulative + self.starting_equity
         return pl.DataFrame({"timestamp": trades["exit_time"], "equity": equity})
 
-    def _compute_daily_returns(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
+    def _compute_daily_returns(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
         cmult = contract_multiplier if contract_multiplier is not None else self.default_contract_multiplier
-        trades = self._apply_contract_multiplier(loaded.trades, cmult)
+        trades = self._filter_by_direction(loaded.trades, direction)
+        trades = self._apply_contract_multiplier(trades, cmult)
         mtm_df = self.load_mtm(loaded.path, loaded.file_id)
 
         # Use MTM sessions when available.
@@ -254,6 +282,7 @@ class PerFileCache:
                 margin_override=margin_override,
                 end_override=last_session_end,
                 trades_override=trades,
+                direction=direction,
             )
             rows = []
             for row in mtm_df.iter_rows(named=True):
@@ -308,24 +337,39 @@ class PerFileCache:
         daily_return = pl.when(capital > 0).then(grouped["pnl"] / capital).otherwise(0)
         return grouped.drop("contracts").with_columns(capital=capital, daily_return=daily_return)
 
-    def _compute_net_positions(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
-        return self._netpos_intervals(loaded, contract_multiplier=contract_multiplier, margin_override=margin_override)[0]
+    def _compute_net_positions(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
+        return self._netpos_intervals(
+            loaded,
+            contract_multiplier=contract_multiplier,
+            margin_override=margin_override,
+            end_override=None,
+            trades_override=None,
+            direction=direction,
+        )[0]
 
-    def _compute_margin(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
-        _, intervals = self._netpos_intervals(loaded, contract_multiplier=contract_multiplier, margin_override=margin_override)
+    def _compute_margin(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
+        _, intervals = self._netpos_intervals(
+            loaded,
+            contract_multiplier=contract_multiplier,
+            margin_override=margin_override,
+            end_override=None,
+            trades_override=None,
+            direction=direction,
+        )
         return intervals.select(
             pl.col("start").alias("timestamp"),
             pl.col("margin_used"),
             pl.col("symbol"),
         )
 
-    def _compute_spikes(self, loaded: LoadedTrades, contract_multiplier: float | None = None) -> pl.DataFrame:
+    def _compute_spikes(self, loaded: LoadedTrades, contract_multiplier: float | None = None, direction: str | None = None) -> pl.DataFrame:
         cmult = contract_multiplier if contract_multiplier is not None else self.default_contract_multiplier
-        trades = self._apply_contract_multiplier(loaded.trades, cmult)
+        trades = self._filter_by_direction(loaded.trades, direction)
+        trades = self._apply_contract_multiplier(trades, cmult)
         if trades.is_empty():
             return pl.DataFrame({"timestamp": [], "marker_value": [], "drawdown": [], "runup": [], "trade_no": []})
 
-        equity = self._compute_equity(loaded, contract_multiplier=contract_multiplier)
+        equity = self._compute_equity(loaded, contract_multiplier=contract_multiplier, direction=direction)
         equity_list = list(equity.iter_rows(named=True))
 
         def equity_at(ts):
@@ -368,6 +412,7 @@ class PerFileCache:
         margin_override: float | None = None,
         end_override: datetime | None = None,
         trades_override: pl.DataFrame | None = None,
+        direction: str | None = None,
     ) -> tuple[pl.DataFrame, pl.DataFrame]:
         """Build per-file net position and margin intervals.
 
@@ -377,6 +422,7 @@ class PerFileCache:
         """
 
         trades = trades_override if trades_override is not None else loaded.trades
+        trades = self._filter_by_direction(trades, direction)
         cmult = contract_multiplier if contract_multiplier is not None else self.default_contract_multiplier
         if trades_override is None:
             trades = self._apply_contract_multiplier(trades, cmult)

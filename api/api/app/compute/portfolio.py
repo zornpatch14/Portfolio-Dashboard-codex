@@ -18,6 +18,7 @@ class PortfolioView:
     net_position: pl.DataFrame
     margin: pl.DataFrame
     contributors: list[Path]
+    spikes: pl.DataFrame | None = None
 
 
 class PortfolioAggregator:
@@ -30,6 +31,8 @@ class PortfolioAggregator:
         metas: Optional[Iterable[TradeFileMetadata]] = None,
         contract_multipliers: Optional[dict[str, float]] = None,
         margin_overrides: Optional[dict[str, float]] = None,
+        direction: Optional[str] = None,
+        include_spikes: bool = False,
     ) -> PortfolioView:
         files = list(files)
         if not files:
@@ -40,6 +43,7 @@ class PortfolioAggregator:
                 net_position=empty,
                 margin=empty,
                 contributors=[],
+                spikes=pl.DataFrame({"timestamp": [], "marker_value": [], "drawdown": [], "runup": [], "trade_no": []}) if include_spikes else None,
             )
 
         meta_map = {m.file_id: m for m in metas} if metas else {}
@@ -59,12 +63,15 @@ class PortfolioAggregator:
         daily_frames = []
         netpos_frames = []
         margin_frames = []
+        spike_frames: list[pl.DataFrame] = []
 
         for path in files:
             cmult, marg = overrides_for(path)
-            daily_frames.append(self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg))
-            netpos_frames.append(self.cache.net_position(path, contract_multiplier=cmult, margin_override=marg))
-            margin_frames.append(self.cache.margin_usage(path, contract_multiplier=cmult, margin_override=marg))
+            daily_frames.append(self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg, direction=direction))
+            netpos_frames.append(self.cache.net_position(path, contract_multiplier=cmult, margin_override=marg, direction=direction))
+            margin_frames.append(self.cache.margin_usage(path, contract_multiplier=cmult, margin_override=marg, direction=direction))
+            if include_spikes:
+                spike_frames.append(self.cache.spike_overlay(path, contract_multiplier=cmult, direction=direction))
 
         combined_daily = pl.concat(daily_frames).group_by("date").agg(
             pnl=pl.col("pnl").sum(),
@@ -85,6 +92,7 @@ class PortfolioAggregator:
 
         netpos = _combine_timeseries(netpos_frames, "net_position")
         margin = _combine_timeseries(margin_frames, "margin_used")
+        spikes_df = pl.concat(spike_frames).sort("timestamp") if include_spikes and spike_frames else None
 
         return PortfolioView(
             equity=equity_curve,
@@ -92,6 +100,7 @@ class PortfolioAggregator:
             net_position=netpos,
             margin=margin,
             contributors=files,
+            spikes=spikes_df,
         )
 
     def downsample_equity(self, view: PortfolioView, target_points: int = 2000) -> DownsampleResult:

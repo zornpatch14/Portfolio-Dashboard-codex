@@ -212,6 +212,8 @@ class DataStore:
                 metas=metas,
                 contract_multipliers=selection.contract_multipliers,
                 margin_overrides=selection.margin_overrides,
+                direction=selection.direction,
+                include_spikes=selection.spike_flag,
             )
             self._portfolio_cache[key] = PortfolioView(
                 equity=built.equity.clone(),
@@ -219,6 +221,7 @@ class DataStore:
                 net_position=built.net_position.clone(),
                 margin=built.margin.clone(),
                 contributors=list(built.contributors),
+                spikes=built.spikes.clone() if built.spikes is not None else None,
             )
             view = PortfolioView(
                 equity=built.equity.clone(),
@@ -226,6 +229,7 @@ class DataStore:
                 net_position=built.net_position.clone(),
                 margin=built.margin.clone(),
                 contributors=list(built.contributors),
+                spikes=built.spikes.clone() if built.spikes is not None else None,
             )
 
         return self._filter_view_by_date(view, selection)
@@ -252,6 +256,8 @@ class DataStore:
         view.equity = filter_frame(view.equity, "timestamp")
         view.net_position = filter_frame(view.net_position, "timestamp")
         view.margin = filter_frame(view.margin, "timestamp")
+        if view.spikes is not None:
+            view.spikes = filter_frame(view.spikes, "timestamp")
         if start_dt or end_dt:
             view.daily_returns = filter_frame(view.daily_returns, "date", is_date=True)
         return view
@@ -317,6 +323,20 @@ class DataStore:
         metas = self._metas_for_selection(selection)
         paths = [Path(m.trades_path) for m in metas]
         rows: list[MetricsRow] = []
+        direction = selection.direction
+
+        def _filter_direction(df: pl.DataFrame) -> pl.DataFrame:
+            if not direction or "direction" not in df.columns:
+                return df
+            dir_norm = direction.lower()
+            dir_col = pl.col("direction").cast(pl.Utf8).str.to_lowercase()
+            if dir_norm == "long":
+                mask = dir_col.is_in(["long", "buy", "buy to open", "buy to cover"])
+            elif dir_norm == "short":
+                mask = dir_col.is_in(["short", "sell short", "sell", "sell to open", "sell to cover"])
+            else:
+                return df
+            return df.filter(mask)
 
         # Per-file metrics
         for meta in metas:
@@ -325,9 +345,9 @@ class DataStore:
             cmult = selection.contract_multipliers.get(symbol)
             marg = selection.margin_overrides.get(symbol)
 
-            equity = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=marg)
-            trades_df = self.cache.load_trades(path).trades
-            daily = self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg)
+            equity = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=marg, direction=direction)
+            trades_df = _filter_direction(self.cache.load_trades(path).trades)
+            daily = self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg, direction=direction)
 
             net_profit = float(equity["equity"][-1] - self.cache.starting_equity) if len(equity) else 0.0
             trades = len(trades_df)
@@ -353,11 +373,12 @@ class DataStore:
             portfolio_net = float(view.equity["equity"][-1] - self.cache.starting_equity)
             port_dd = _max_drawdown(view.equity)
             port_daily = float(view.daily_returns["daily_return"].mean()) if len(view.daily_returns) else 0.0
+            dir_trades = sum(len(_filter_direction(self.cache.load_trades(p).trades)) for p in paths)
             def addp(metric: str, value: float) -> None:
                 rows.append(MetricsRow(file_id="portfolio", metric=metric, value=value, level="portfolio"))
 
             addp("net_profit", portfolio_net)
-            addp("trades", float(sum(len(self.cache.load_trades(p).trades) for p in paths)))
+            addp("trades", float(dir_trades))
             addp("max_drawdown", port_dd)
             addp("avg_daily_return", port_daily)
 
