@@ -210,11 +210,6 @@ class PerFileCache:
         equity = cumulative + self.starting_equity
         return pl.DataFrame({"timestamp": trades["exit_time"], "equity": equity})
 
-    def _compute_percent_equity(self, loaded: LoadedTrades) -> pl.DataFrame:
-        equity_df = self._compute_equity(loaded)
-        percent = equity_df["equity"] / self.starting_equity * 100
-        return pl.DataFrame({"timestamp": equity_df["timestamp"], "percent_equity": percent})
-
     def _compute_daily_returns(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
         cmult = contract_multiplier if contract_multiplier is not None else self.default_contract_multiplier
         trades = self._apply_contract_multiplier(loaded.trades, cmult)

@@ -22,7 +22,6 @@ def test_per_file_caches_roundtrip(tmp_path: Path) -> None:
 
     bundle = cache.bundle(files[0])
     assert len(bundle.equity) > 0
-    assert len(bundle.percent_equity) == len(bundle.equity)
     assert set(bundle.daily_returns.columns) == {"date", "pnl", "capital", "daily_return"}
 
     # ensure cache hit path works
@@ -39,7 +38,6 @@ def test_portfolio_aggregation(tmp_path: Path) -> None:
     assert len(view.daily_returns) > 0
     assert len(view.net_position) > 0
     assert len(view.margin) == len(view.net_position)
-    assert all(col in view.percent_equity.columns for col in ["timestamp", "percent_equity"])
 
 
 def test_downsampling() -> None:

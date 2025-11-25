@@ -222,7 +222,6 @@ class DataStore:
             return out
 
         view.equity = filter_frame(view.equity, "timestamp")
-        view.percent_equity = filter_frame(view.percent_equity, "timestamp")
         view.net_position = filter_frame(view.net_position, "timestamp")
         view.margin = filter_frame(view.margin, "timestamp")
         if start_dt or end_dt:
@@ -253,9 +252,6 @@ class DataStore:
 
         if series_name == "equity":
             return build_timeseries(view.equity, "equity", "equity")
-
-        if series_name == "equity_percent":
-            return build_timeseries(view.percent_equity, "percent_equity", "equity_percent")
 
         if series_name in {"drawdown", "intraday_drawdown"}:
             dd_values = _drawdown_from_equity(view.equity)
