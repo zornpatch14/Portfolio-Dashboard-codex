@@ -55,17 +55,19 @@ class PerFileCache:
                 return pl.DataFrame({"mtm_date": [], "mtm_net_profit": [], "mtm_session_start": [], "mtm_session_end": []})
         return pl.DataFrame({"mtm_date": [], "mtm_net_profit": [], "mtm_session_start": [], "mtm_session_end": []})
 
-    def equity_curve(self, path: Path) -> pl.DataFrame:
-        return self._get_or_build(path, "equity", self._compute_equity)
+    def equity_curve(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
+        return self._get_or_build(path, "equity", lambda loaded: self._compute_equity(loaded, contract_multiplier, margin_override))
 
-    def daily_returns(self, path: Path) -> pl.DataFrame:
-        return self._get_or_build(path, "daily_returns", self._compute_daily_returns)
+    def daily_returns(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None) -> pl.DataFrame:
+        return self._get_or_build(path, "daily_returns", lambda loaded: self._compute_daily_returns(loaded, contract_multiplier, margin_override))
 
-    def net_position(self, path: Path) -> pl.DataFrame:
-        return self._get_or_build(path, "netpos", self._compute_net_positions)
+    def net_position(self, path: Path, margin_override: float | None = None) -> pl.DataFrame:
+        points, _ = self._netpos_intervals(self.load_trades(path), margin_override=margin_override)
+        return points
 
-    def margin_usage(self, path: Path) -> pl.DataFrame:
-        return self._get_or_build(path, "margin", self._compute_margin)
+    def margin_usage(self, path: Path, margin_override: float | None = None) -> pl.DataFrame:
+        _, intervals = self._netpos_intervals(self.load_trades(path), margin_override=margin_override)
+        return intervals.select(pl.col("start").alias("timestamp"), pl.col("margin_used"))
 
     def spike_overlay(self, path: Path) -> pl.DataFrame:
         return self._get_or_build(path, "spikes", self._compute_spikes)
