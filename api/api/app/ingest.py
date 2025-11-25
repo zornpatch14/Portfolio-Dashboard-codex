@@ -195,6 +195,9 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
     exit_types = {"Sell", "Buy to Cover"}
 
     sym, interval, strat = parse_filename_meta(str(file_path))
+    # Validate symbol presence; defer unknown symbols to compute with fallback spec.
+    if not sym:
+        raise ValueError(f"Could not parse symbol from filename {file_path.name}")
     trades: list[dict[str, Any]] = []
     last_exit_cum = 0.0
     # Keep the raw cumulative/net profit values for QA/parity; recomputation happens separately.
@@ -361,6 +364,11 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
         for c in num_cols:
             if c in trades_df.columns:
                 trades_df[c] = pd.to_numeric(trades_df[c], errors="coerce")
+
+        # Validate numeric price columns; fail fast if non-numeric prices are present.
+        for price_col in ["entry_price", "exit_price"]:
+            if price_col in trades_df.columns and trades_df[price_col].isna().all():
+                raise ValueError(f"No numeric prices parsed in column {price_col} for {file_path.name}")
 
         if "exit_time" in trades_df.columns:
             trades_df.sort_values(["exit_time", "entry_time", "trade_no"], inplace=True)
