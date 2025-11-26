@@ -3,6 +3,8 @@ import selectionsData from '../data/selections.json';
 export type Selection = {
   name: string;
   files: string[];
+  fileIds?: string[];
+  fileLabels?: Record<string, string>;
   symbols: string[];
   intervals: string[];
   strategies: string[];
@@ -11,7 +13,10 @@ export type Selection = {
   end: string | null;
   contracts: Record<string, number>;
   margins: Record<string, number>;
+  contractMultipliers?: Record<string, number>;
+  marginOverrides?: Record<string, number>;
   spike: boolean;
+  downsample?: boolean;
 };
 
 export function loadSampleSelections(): Selection[] {

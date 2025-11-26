@@ -148,18 +148,24 @@ function seeded(seed: string) {
   };
 }
 
-function selectionQuery(selection: Selection) {
+function selectionQuery(selection: Selection, opts?: { downsample?: boolean }) {
   const params = new URLSearchParams();
-  selection.files.forEach((file) => params.append('files', file));
+  const fileIds = selection.fileIds && selection.fileIds.length ? selection.fileIds : selection.files;
+  fileIds.forEach((file) => params.append('files', file));
   selection.symbols.forEach((symbol) => params.append('symbols', symbol));
   selection.intervals.forEach((interval) => params.append('intervals', interval));
   selection.strategies.forEach((strategy) => params.append('strategies', strategy));
   if (selection.direction) params.set('direction', selection.direction);
-  if (selection.start) params.set('start', selection.start);
-  if (selection.end) params.set('end', selection.end);
-  Object.entries(selection.contracts).forEach(([key, val]) => params.append(`contracts[${key}]`, String(val)));
-  Object.entries(selection.margins).forEach(([key, val]) => params.append(`margins[${key}]`, String(val)));
-  params.set('spike', String(selection.spike));
+  if (selection.start) params.set('start_date', selection.start);
+  if (selection.end) params.set('end_date', selection.end);
+  const contractMultipliers = selection.contractMultipliers ?? selection.contracts;
+  const marginOverrides = selection.marginOverrides ?? selection.margins;
+  Object.entries(contractMultipliers).forEach(([key, val]) => params.append('contract_multipliers', `${key}:${val}`));
+  Object.entries(marginOverrides).forEach(([key, val]) => params.append('margin_overrides', `${key}:${val}`));
+  params.set('spike_flag', String(selection.spike));
+  if (opts && opts.downsample !== undefined) {
+    params.set('downsample', String(opts.downsample));
+  }
   return params.toString();
 }
 
@@ -306,8 +312,8 @@ export function mockCta(selection: Selection): CTAResponse {
   };
 }
 
-export async function fetchSeries(selection: Selection, kind: SeriesKind) {
-  const query = selectionQuery(selection);
+export async function fetchSeries(selection: Selection, kind: SeriesKind, downsample: boolean = true) {
+  const query = selectionQuery(selection, { downsample });
   const path = `${endpoint[kind]}?${query}`;
   if (!API_BASE) {
     throw new Error('NEXT_PUBLIC_API_BASE is not set; cannot load series data');
