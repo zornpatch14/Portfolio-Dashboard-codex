@@ -1016,18 +1016,16 @@ export default function HomePage() {
         {activeBadge}
       </div>
       <div className="card" style={{ marginTop: 12 }}>
-        <SeriesChart
-          title="Intraday Drawdown"
-          {intradayDdQuery.data ? (
-            <>
-              <SeriesChart title="Intraday Drawdown" series={intradayDdQuery.data} color="#f4c95d" />
-              <div className="text-muted small">
-                Points: {intradayDdQuery.data?.downsampled_count ?? intradayDdQuery.data?.data.length ?? 0}
-              </div>
-            </>
-          ) : (
-            <div className="placeholder-text">No intraday drawdown data.</div>
-          )}
+        {intradayDdQuery.data ? (
+          <>
+            <SeriesChart title="Intraday Drawdown" series={intradayDdQuery.data} color="#f4c95d" />
+            <div className="text-muted small">
+              Points: {intradayDdQuery.data?.downsampled_count ?? intradayDdQuery.data?.data.length ?? 0}
+            </div>
+          </>
+        ) : (
+          <div className="placeholder-text">No intraday drawdown data.</div>
+        )}
       </div>
     </div>
   );
