@@ -1412,7 +1412,7 @@ export default function HomePage() {
       </div>
 
       <div style={{ marginTop: 12 }}>
-        <SelectionControls selection={activeSelection} availableFiles={availableFiles} onChange={setActiveSelection} />
+        <SelectionControls selection={activeSelection} availableFiles={availableFiles} fileLabelMap={fileLabelMap} onChange={setActiveSelection} />
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
