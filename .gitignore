@@ -33,4 +33,10 @@ web/node_modules/
 *.secret
 *.key
 
+# --- Local data/cache produced by the app ---
+storage/
+data/
+*.parquet
+metadata/
+
 archive/
