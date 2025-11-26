@@ -18,6 +18,9 @@ import {
   uploadFiles,
   getSelectionMeta,
   listFiles,
+  mockCorrelations,
+  mockOptimizer,
+  mockCta,
   SeriesKind,
 } from '../lib/api';
 import { loadSampleSelections, Selection } from '../lib/selections';
