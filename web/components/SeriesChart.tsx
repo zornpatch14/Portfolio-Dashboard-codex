@@ -24,7 +24,7 @@ export default function SeriesChart({ title, series, color = '#4cc3ff' }: Props)
       xAxis: {
         type: 'category',
         boundaryGap: false,
-        data: series.points.map((p) => p.timestamp),
+        data: series.data.map((p) => p.timestamp),
         axisLine: { lineStyle: { color: '#334b76' } },
         axisLabel: { color: '#a5b2c9' },
       },
@@ -36,11 +36,11 @@ export default function SeriesChart({ title, series, color = '#4cc3ff' }: Props)
       },
       series: [
         {
-          name: series.label,
+          name: series.series,
           type: 'line',
           smooth: true,
           showSymbol: false,
-          data: series.points.map((p) => p.value),
+          data: series.data.map((p) => p.value),
           areaStyle: {
             opacity: 0.2,
             color,

@@ -136,24 +136,21 @@ export default function HomePage() {
       ...seriesKinds.map((kind) => ({
         queryKey: [kind, activeSelection.name, (activeSelection.fileIds || activeSelection.files).join(',')],
         queryFn: () => fetchSeries(activeSelection, kind, includeDownsample),
-        initialData: mockSeries(activeSelection, kind),
       })),
       {
         queryKey: ['histogram', activeSelection.name, (activeSelection.fileIds || activeSelection.files).join(',')],
         queryFn: () => fetchHistogram(activeSelection),
-        initialData: mockHistogram(activeSelection),
       },
       {
         queryKey: ['metrics', activeSelection.name, (activeSelection.fileIds || activeSelection.files).join(',')],
         queryFn: () => fetchMetrics(activeSelection),
-        initialData: [],
       },
     ],
   });
 
   useEffect(() => {
-    const series = equityQuery.data ?? mockSeries(activeSelection, 'equity');
-    const timestamps = series.points?.map((p) => p.timestamp).filter(Boolean) ?? [];
+    const points = equityQuery.data?.data ?? [];
+    const timestamps = points.map((p) => p.timestamp).filter(Boolean) ?? [];
     if (!timestamps.length) return;
     const sorted = [...timestamps].sort();
     const rangeStart = sorted[0];
@@ -180,91 +177,14 @@ export default function HomePage() {
   }, [fileLabelMap]);
 
   const equityLines = useMemo(() => {
-    const files = availableFiles.filter((file) => {
-      if (!activeSelection.files.includes(file)) return false;
-      const meta = deriveFileMeta(file);
-      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
-      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
-      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
-      const contracts = activeSelection.contracts[file] ?? 1;
-      if (contracts === 0) return false;
-      return true;
-    });
-
-    const startDate = activeSelection.start;
-    const endDate = activeSelection.end;
-
-    const perFile = files.map((file) => {
-      const contracts = activeSelection.contracts[file] ?? 1;
-      const mockSelection = { ...activeSelection, name: file, files: [file] };
-      const base = mockSeries(mockSelection, 'equity');
-      const filteredPoints = base.points.filter((p) => {
-        if (startDate && p.timestamp < startDate) return false;
-        if (endDate && p.timestamp > endDate) return false;
-        return true;
-      });
-      return {
-        name: file,
-        points: filteredPoints.map((p) => ({ ...p, value: p.value * contracts })),
-      };
-    });
-
-    const allTimestamps = Array.from(
-      new Set(perFile.flatMap((s) => s.points.map((p) => p.timestamp))),
-    ).sort();
-    const portfolioPoints = allTimestamps.map((ts) => {
-      const sum = perFile.reduce((acc, series) => {
-        const point = series.points.find((p) => p.timestamp === ts);
-        return acc + (point?.value ?? 0);
-      }, 0);
-      return { timestamp: ts, value: sum };
-    });
-
-    return { perFile, portfolio: portfolioPoints };
-  }, [availableFiles, activeSelection, deriveFileMeta]);
+    const portfolioPoints = (equityQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    return { perFile: [], portfolio: portfolioPoints };
+  }, [equityQuery.data]);
 
   const equityPercentLines = useMemo(() => {
-    const files = availableFiles.filter((file) => {
-      if (!activeSelection.files.includes(file)) return false;
-      const meta = deriveFileMeta(file);
-      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
-      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
-      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
-      const contracts = activeSelection.contracts[file] ?? 1;
-      if (contracts === 0) return false;
-      return true;
-    });
-
-    const startDate = activeSelection.start;
-    const endDate = activeSelection.end;
-
-    const perFile = files.map((file) => {
-      const mockSelection = { ...activeSelection, name: file, files: [file] };
-      const base = mockSeries(mockSelection, 'equityPercent');
-      const filteredPoints = base.points.filter((p) => {
-        if (startDate && p.timestamp < startDate) return false;
-        if (endDate && p.timestamp > endDate) return false;
-        return true;
-      });
-      return {
-        name: file,
-        points: filteredPoints,
-      };
-    });
-
-    const allTimestamps = Array.from(
-      new Set(perFile.flatMap((s) => s.points.map((p) => p.timestamp))),
-    ).sort();
-    const portfolioPoints = allTimestamps.map((ts) => {
-      const sum = perFile.reduce((acc, series) => {
-        const point = series.points.find((p) => p.timestamp === ts);
-        return acc + (point?.value ?? 0);
-      }, 0);
-      return { timestamp: ts, value: sum };
-    });
-
-    return { perFile, portfolio: portfolioPoints };
-  }, [availableFiles, activeSelection, deriveFileMeta]);
+    const portfolioPoints = (equityPctQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    return { perFile: [], portfolio: portfolioPoints };
+  }, [equityPctQuery.data]);
 
   useEffect(() => {
     const names = new Set<string>();
@@ -284,48 +204,9 @@ export default function HomePage() {
   }, [equityLines.perFile, equityPercentLines.perFile]);
 
   const drawdownLines = useMemo(() => {
-    const files = availableFiles.filter((file) => {
-      if (!activeSelection.files.includes(file)) return false;
-      const meta = deriveFileMeta(file);
-      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
-      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
-      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
-      const contracts = activeSelection.contracts[file] ?? 1;
-      if (contracts === 0) return false;
-      return true;
-    });
-
-    const startDate = activeSelection.start;
-    const endDate = activeSelection.end;
-
-    const perFile = files.map((file) => {
-      const contracts = activeSelection.contracts[file] ?? 1;
-      const mockSelection = { ...activeSelection, name: file, files: [file] };
-      const base = mockSeries(mockSelection, 'drawdown');
-      const filteredPoints = base.points.filter((p) => {
-        if (startDate && p.timestamp < startDate) return false;
-        if (endDate && p.timestamp > endDate) return false;
-        return true;
-      });
-      return {
-        name: file,
-        points: filteredPoints.map((p) => ({ ...p, value: p.value * contracts })),
-      };
-    });
-
-    const allTimestamps = Array.from(
-      new Set(perFile.flatMap((s) => s.points.map((p) => p.timestamp))),
-    ).sort();
-    const portfolioPoints = allTimestamps.map((ts) => {
-      const sum = perFile.reduce((acc, series) => {
-        const point = series.points.find((p) => p.timestamp === ts);
-        return acc + (point?.value ?? 0);
-      }, 0);
-      return { timestamp: ts, value: sum };
-    });
-
-    return { perFile, portfolio: portfolioPoints };
-  }, [availableFiles, activeSelection, deriveFileMeta]);
+    const portfolioPoints = (drawdownQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    return { perFile: [], portfolio: portfolioPoints };
+  }, [drawdownQuery.data]);
 
   const drawdownPercentLines = useMemo(() => {
     const equityBase = accountEquity || 1;
@@ -355,91 +236,14 @@ export default function HomePage() {
   }, [drawdownLines.perFile]);
 
   const marginLines = useMemo(() => {
-    const files = availableFiles.filter((file) => {
-      if (!activeSelection.files.includes(file)) return false;
-      const meta = deriveFileMeta(file);
-      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
-      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
-      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
-      const contracts = activeSelection.contracts[file] ?? 1;
-      if (contracts === 0) return false;
-      return true;
-    });
-
-    const startDate = activeSelection.start;
-    const endDate = activeSelection.end;
-
-    const perFile = files.map((file) => {
-      const contracts = activeSelection.contracts[file] ?? 1;
-      const mockSelection = { ...activeSelection, name: file, files: [file] };
-      const base = mockSeries(mockSelection, 'margin');
-      const filteredPoints = base.points.filter((p) => {
-        if (startDate && p.timestamp < startDate) return false;
-        if (endDate && p.timestamp > endDate) return false;
-        return true;
-      });
-      return {
-        name: file,
-        points: filteredPoints.map((p) => ({ ...p, value: p.value * contracts })),
-      };
-    });
-
-    const allTimestamps = Array.from(
-      new Set(perFile.flatMap((s) => s.points.map((p) => p.timestamp))),
-    ).sort();
-    const portfolioPoints = allTimestamps.map((ts) => {
-      const sum = perFile.reduce((acc, series) => {
-        const point = series.points.find((p) => p.timestamp === ts);
-        return acc + (point?.value ?? 0);
-      }, 0);
-      return { timestamp: ts, value: sum };
-    });
-
-    return { perFile, portfolio: portfolioPoints };
-  }, [availableFiles, activeSelection, deriveFileMeta]);
+    const portfolioPoints = (marginQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    return { perFile: [], portfolio: portfolioPoints };
+  }, [marginQuery.data]);
 
   const netposLines = useMemo(() => {
-    const files = availableFiles.filter((file) => {
-      if (!activeSelection.files.includes(file)) return false;
-      const meta = deriveFileMeta(file);
-      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
-      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
-      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
-      const contracts = activeSelection.contracts[file] ?? 1;
-      if (contracts === 0) return false;
-      return true;
-    });
-
-    const startDate = activeSelection.start;
-    const endDate = activeSelection.end;
-
-    const perFile = files.map((file) => {
-      const mockSelection = { ...activeSelection, name: file, files: [file] };
-      const base = mockSeries(mockSelection, 'netpos');
-      const filteredPoints = base.points.filter((p) => {
-        if (startDate && p.timestamp < startDate) return false;
-        if (endDate && p.timestamp > endDate) return false;
-        return true;
-      });
-      return {
-        name: file,
-        points: filteredPoints.map((p) => ({ ...p, value: p.value })),
-      };
-    });
-
-    const allTimestamps = Array.from(
-      new Set(perFile.flatMap((s) => s.points.map((p) => p.timestamp))),
-    ).sort();
-    const portfolioPoints = allTimestamps.map((ts) => {
-      const sum = perFile.reduce((acc, series) => {
-        const point = series.points.find((p) => p.timestamp === ts);
-        return acc + (point?.value ?? 0);
-      }, 0);
-      return { timestamp: ts, value: sum };
-    });
-
-    return { perFile, portfolio: portfolioPoints };
-  }, [availableFiles, activeSelection, deriveFileMeta]);
+    const portfolioPoints = (netposQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    return { perFile: [], portfolio: portfolioPoints };
+  }, [netposQuery.data]);
 
   const purchasingPowerLines = useMemo(() => {
     const timeline = Array.from(
@@ -501,25 +305,9 @@ export default function HomePage() {
   }, [purchasingPowerLines.perFile]);
 
   const histogramData = useMemo(() => {
-    const files = availableFiles.filter((file) => {
-      if (!activeSelection.files.includes(file)) return false;
-      const meta = deriveFileMeta(file);
-      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
-      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
-      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
-      const contracts = activeSelection.contracts[file] ?? 1;
-      if (contracts === 0) return false;
-      return true;
-    });
-
-    const perFile = files.map((file) => {
-      const mockSelection = { ...activeSelection, name: file, files: [file] };
-      const hist = mockHistogram(mockSelection);
-      return { name: file, buckets: hist.buckets };
-    });
-
-    return perFile;
-  }, [availableFiles, activeSelection, deriveFileMeta]);
+    const portfolioBuckets = histogramQuery.data?.buckets ?? [];
+    return portfolioBuckets.length ? [{ name: 'Portfolio', buckets: portfolioBuckets }] : [];
+  }, [histogramQuery.data]);
 
   useEffect(() => {
     const names = new Set<string>();
@@ -1320,8 +1108,7 @@ export default function HomePage() {
 
       {(() => {
         const activeHists = histogramData.filter((h) => plotHistogramEnabled[h.name] !== false);
-        const fallback = histogramQuery.data ?? mockHistogram(activeSelection);
-        const bucketOrder = activeHists[0]?.buckets.map((b) => b.bucket) ?? fallback.buckets.map((b) => b.bucket);
+        const bucketOrder = activeHists[0]?.buckets.map((b) => b.bucket) ?? [];
         const bucketMap = new Map(bucketOrder.map((b) => [b, 0]));
         activeHists.forEach((hist) => {
           hist.buckets.forEach((bucket) => {

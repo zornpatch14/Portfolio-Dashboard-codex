@@ -6,10 +6,12 @@ export type SeriesPoint = {
 };
 
 export type SeriesResponse = {
-  label: string;
-  points: SeriesPoint[];
-  rawCount?: number;
-  downsampledCount?: number;
+  series: string;
+  selection?: Selection;
+  downsampled?: boolean;
+  raw_count?: number;
+  downsampled_count?: number;
+  data: SeriesPoint[];
 };
 
 export type HistogramBucket = {
