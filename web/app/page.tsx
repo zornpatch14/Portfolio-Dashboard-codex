@@ -25,6 +25,7 @@ import {
 import { loadSampleSelections, Selection } from '../lib/selections';
 
 const selections = loadSampleSelections();
+const SELECTION_STORAGE_KEY = 'portfolio-selection-state';
 const tabs = [
   { key: 'load-trade-lists', label: 'Load Trade Lists' },
   { key: 'summary', label: 'Summary' },
@@ -55,6 +56,34 @@ export default function HomePage() {
   const [riskfolioMode, setRiskfolioMode] = useState<'mean-risk' | 'risk-parity' | 'hierarchical'>('mean-risk');
   const apiBase = process.env.NEXT_PUBLIC_API_BASE;
   const apiMissing = !apiBase;
+
+  useEffect(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem(SELECTION_STORAGE_KEY) : null;
+      if (stored) {
+        const parsed = JSON.parse(stored) as { selection: Selection; includeDownsample?: boolean };
+        if (parsed.selection) {
+          setActiveSelection(parsed.selection);
+        }
+        if (typeof parsed.includeDownsample === 'boolean') {
+          setIncludeDownsample(parsed.includeDownsample);
+        }
+      }
+    } catch {
+      // ignore corrupted storage
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const payload = JSON.stringify({ selection: activeSelection, includeDownsample });
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(SELECTION_STORAGE_KEY, payload);
+      }
+    } catch {
+      // ignore write failures
+    }
+  }, [activeSelection, includeDownsample]);
 
   const availableFiles = useMemo(
     () => Array.from(new Set(selections.flatMap((s) => s.files))).sort(),
