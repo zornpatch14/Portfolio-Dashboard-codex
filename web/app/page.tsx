@@ -166,8 +166,9 @@ export default function HomePage() {
     const timestamps = points.map((p) => p.timestamp).filter(Boolean) ?? [];
     if (!timestamps.length) return;
     const sorted = [...timestamps].sort();
-    const rangeStart = sorted[0];
-    const rangeEnd = sorted[sorted.length - 1];
+    const toDate = (ts: string) => ts.slice(0, 10);
+    const rangeStart = toDate(sorted[0]);
+    const rangeEnd = toDate(sorted[sorted.length - 1]);
     setActiveSelection((prev) => {
       const nextStart = prev.start ?? rangeStart;
       const nextEnd = prev.end ?? rangeEnd;
