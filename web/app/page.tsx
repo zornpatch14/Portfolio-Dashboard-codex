@@ -15,6 +15,9 @@ import {
   fetchMetrics,
   fetchOptimizer,
   fetchSeries,
+  uploadFiles,
+  getSelectionMeta,
+  listFiles,
   mockCorrelations,
   mockCta,
   mockHistogram,
@@ -26,6 +29,7 @@ import { loadSampleSelections, Selection } from '../lib/selections';
 
 const selections = loadSampleSelections();
 const SELECTION_STORAGE_KEY = 'portfolio-selection-state';
+const UPLOAD_INPUT_ID = 'upload-input';
 const tabs = [
   { key: 'load-trade-lists', label: 'Load Trade Lists' },
   { key: 'summary', label: 'Summary' },
@@ -54,6 +58,9 @@ export default function HomePage() {
   const [plotMarginEnabled, setPlotMarginEnabled] = useState<Record<string, boolean>>({});
   const [plotHistogramEnabled, setPlotHistogramEnabled] = useState<Record<string, boolean>>({});
   const [riskfolioMode, setRiskfolioMode] = useState<'mean-risk' | 'risk-parity' | 'hierarchical'>('mean-risk');
+  const [selectionMeta, setSelectionMeta] = useState<Awaited<ReturnType<typeof getSelectionMeta>> | null>(null);
+  const [filesMeta, setFilesMeta] = useState<Awaited<ReturnType<typeof listFiles>>>([]);
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const apiBase = process.env.NEXT_PUBLIC_API_BASE;
   const apiMissing = !apiBase;
 
@@ -85,9 +92,32 @@ export default function HomePage() {
     }
   }, [activeSelection, includeDownsample]);
 
+  useEffect(() => {
+    if (apiMissing) return;
+    (async () => {
+      try {
+        const meta = await getSelectionMeta();
+        setSelectionMeta(meta);
+        setFilesMeta(meta.files);
+        if (!activeSelection.fileIds || !activeSelection.fileIds.length) {
+          const ids = meta.files.map((f) => f.file_id);
+          const labels = Object.fromEntries(meta.files.map((f) => [f.file_id, f.filename]));
+          setActiveSelection((prev) => ({ ...prev, fileIds: ids, fileLabels: labels, files: ids }));
+        }
+      } catch (error) {
+        console.warn('Failed to load selection metadata', error);
+      }
+    })();
+  }, [apiMissing]);
+
   const availableFiles = useMemo(
-    () => Array.from(new Set(selections.flatMap((s) => s.files))).sort(),
-    [],
+    () => (filesMeta.length ? filesMeta.map((f) => f.file_id).sort() : Array.from(new Set(selections.flatMap((s) => s.files))).sort()),
+    [filesMeta],
+  );
+
+  const fileLabelMap = useMemo(
+    () => Object.fromEntries(filesMeta.map((f) => [f.file_id, f.filename])),
+    [filesMeta],
   );
 
   const seriesKinds: SeriesKind[] = ['equity', 'equityPercent', 'drawdown', 'intradayDrawdown', 'netpos', 'margin'];
@@ -104,17 +134,17 @@ export default function HomePage() {
   ] = useQueries({
     queries: [
       ...seriesKinds.map((kind) => ({
-        queryKey: [kind, activeSelection.name, activeSelection.files.join(',')],
-        queryFn: () => fetchSeries(activeSelection, kind),
+        queryKey: [kind, activeSelection.name, (activeSelection.fileIds || activeSelection.files).join(',')],
+        queryFn: () => fetchSeries(activeSelection, kind, includeDownsample),
         initialData: mockSeries(activeSelection, kind),
       })),
       {
-        queryKey: ['histogram', activeSelection.name, activeSelection.files.join(',')],
+        queryKey: ['histogram', activeSelection.name, (activeSelection.fileIds || activeSelection.files).join(',')],
         queryFn: () => fetchHistogram(activeSelection),
         initialData: mockHistogram(activeSelection),
       },
       {
-        queryKey: ['metrics', activeSelection.name, activeSelection.files.join(',')],
+        queryKey: ['metrics', activeSelection.name, (activeSelection.fileIds || activeSelection.files).join(',')],
         queryFn: () => fetchMetrics(activeSelection),
         initialData: [],
       },
@@ -137,8 +167,9 @@ export default function HomePage() {
   }, [equityQuery.data, activeSelection.name]);
 
   const deriveFileMeta = useMemo(() => {
-    return (file: string) => {
-      const base = file.split('/').pop() || file;
+    return (fileId: string) => {
+      const label = fileLabelMap[fileId] || fileId;
+      const base = label.split('/').pop() || label;
       const parts = base.replace(/\.[^.]+$/, '').split('_');
       return {
         symbol: parts[1] || '',
@@ -146,7 +177,7 @@ export default function HomePage() {
         strategy: parts.slice(3).join('_') || '',
       };
     };
-  }, []);
+  }, [fileLabelMap]);
 
   const equityLines = useMemo(() => {
     const files = availableFiles.filter((file) => {
@@ -1400,8 +1431,51 @@ export default function HomePage() {
       </p>
 
       <div className="card" style={{ marginTop: 14 }}>
-        <div className="upload-area">Drag & drop or select .xlsx files</div>
-        <div className="text-muted small" style={{ marginTop: 6 }}>Uploads mirror Dash (multiple files, persistent list).</div>
+        <div className="upload-area">
+          <label htmlFor={UPLOAD_INPUT_ID} style={{ cursor: 'pointer', display: 'block' }}>
+            Drag & drop or select .xlsx files
+          </label>
+          <input
+            id={UPLOAD_INPUT_ID}
+            type="file"
+            accept=".xlsx"
+            multiple
+            style={{ display: 'none' }}
+            onChange={async (event) => {
+              const files = event.target.files;
+              if (!files || !files.length) return;
+              const formData = new FormData();
+              Array.from(files).forEach((file) => formData.append('files', file));
+              try {
+                setUploadStatus('Uploading...');
+                const response = await uploadFiles(formData);
+                setUploadStatus(`Upload job ${response.job_id} completed (${response.files.length} files ingested)`);
+                const meta = await getSelectionMeta();
+                setSelectionMeta(meta);
+                setFilesMeta(meta.files);
+                const ids = meta.files.map((f) => f.file_id);
+                const labels = Object.fromEntries(meta.files.map((f) => [f.file_id, f.filename]));
+                setActiveSelection((prev) => ({
+                  ...prev,
+                  fileIds: ids,
+                  fileLabels: labels,
+                  files: ids,
+                }));
+              } catch (error) {
+                setUploadStatus('Upload failed');
+                console.error('Upload error', error);
+              } finally {
+                if (event.target) {
+                  event.target.value = '';
+                }
+              }
+            }}
+          />
+        </div>
+        <div className="text-muted small" style={{ marginTop: 6 }}>
+          Uploads mirror Dash (multiple files, persistent list).
+          {uploadStatus ? ` ${uploadStatus}` : ''}
+        </div>
       </div>
 
       <div className="grid-2" style={{ marginTop: 14 }}>
@@ -1435,13 +1509,14 @@ export default function HomePage() {
             </button>
           </div>
           <div className="file-rows" style={{ marginTop: 10, display: 'grid', gap: 10 }}>
-            {availableFiles.map((file) => {
-              const active = activeSelection.files.includes(file);
-              const contractValue = activeSelection.contracts[file] ?? 1;
-              const marginValue = activeSelection.margins[file] ?? '';
+            {availableFiles.map((fileId) => {
+              const label = fileLabelMap[fileId] || fileId;
+              const active = activeSelection.files.includes(fileId);
+              const contractValue = activeSelection.contracts[fileId] ?? 1;
+              const marginValue = activeSelection.margins[fileId] ?? '';
               return (
                 <div
-                  key={file}
+                  key={fileId}
                   className="card"
                   style={{
                     padding: '10px 12px',
@@ -1457,12 +1532,12 @@ export default function HomePage() {
                     onClick={() =>
                       setActiveSelection((prev) => ({
                         ...prev,
-                        files: active ? prev.files.filter((f) => f !== file) : [...prev.files, file],
+                        files: active ? prev.files.filter((f) => f !== fileId) : [...prev.files, fileId],
                       }))
                     }
                     style={{ justifyContent: 'flex-start' }}
                   >
-                    {file}
+                    {label}
                   </button>
                   <input
                     type="number"
@@ -1474,7 +1549,7 @@ export default function HomePage() {
                       const next = Number(event.target.value);
                       setActiveSelection((prev) => ({
                         ...prev,
-                        contracts: { ...prev.contracts, [file]: Number.isNaN(next) ? 0 : next },
+                        contracts: { ...prev.contracts, [fileId]: Number.isNaN(next) ? 0 : next },
                       }));
                     }}
                     placeholder="Contracts"
@@ -1489,7 +1564,7 @@ export default function HomePage() {
                       const next = Number(event.target.value);
                       setActiveSelection((prev) => ({
                         ...prev,
-                        margins: { ...prev.margins, [file]: Number.isNaN(next) ? 0 : next },
+                        margins: { ...prev.margins, [fileId]: Number.isNaN(next) ? 0 : next },
                       }));
                     }}
                     placeholder="Margin $/contract"
@@ -1535,13 +1610,15 @@ export default function HomePage() {
             </tr>
           </thead>
           <tbody>
-            {availableFiles.map((file) => (
-              <tr key={file}>
-                <td>{file}</td>
-                <td>Auto-parsed</td>
-                <td>15 / 30 / 60</td>
-                <td>Strategy A/B</td>
-                <td>Rolling</td>
+            {filesMeta.map((file) => (
+              <tr key={file.file_id}>
+                <td>{file.filename}</td>
+                <td>{file.symbols.join(', ')}</td>
+                <td>{file.intervals.join(', ')}</td>
+                <td>{file.strategies.join(', ')}</td>
+                <td>
+                  {file.date_min || file.date_max ? `${file.date_min || '—'} to ${file.date_max || '—'}` : '—'}
+                </td>
               </tr>
             ))}
           </tbody>
