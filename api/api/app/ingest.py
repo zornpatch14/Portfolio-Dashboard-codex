@@ -401,6 +401,7 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
 class TradeFileMetadata:
     file_id: str
     filename: str
+    original_filename: str | None
     file_hash: str
     symbol: str
     interval: int | None
@@ -427,6 +428,8 @@ class TradeFileMetadata:
         for key in ["date_min", "date_max"]:
             if data.get(key):
                 data[key] = datetime.fromisoformat(data[key])
+        if "original_filename" not in data:
+            data["original_filename"] = data.get("filename")
         return cls(**data)
 
 
@@ -492,6 +495,7 @@ class IngestService:
         file_hash = _sha256_file(xlsx_path)
         file_id = file_hash[:12]
         data_version = os.getenv("DATA_VERSION")
+        # Preserve the user-provided filename for display.
         filename = original_filename or os.path.basename(xlsx_path)
 
         self.trades_dir.mkdir(parents=True, exist_ok=True)
@@ -528,6 +532,7 @@ class IngestService:
         meta = TradeFileMetadata(
             file_id=file_id,
             filename=filename,
+            original_filename=filename,
             file_hash=file_hash,
             symbol=symbol,
             interval=interval,
