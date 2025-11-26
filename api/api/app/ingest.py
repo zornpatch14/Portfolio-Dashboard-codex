@@ -484,7 +484,7 @@ class IngestService:
         self.mtm_dir = root / "parquet" / "mtm"
         self.index = MetadataIndex(root / "metadata" / "index.json")
 
-    def ingest_file(self, xlsx_path: Path) -> TradeFileMetadata:
+    def ingest_file(self, xlsx_path: Path, original_filename: str | None = None) -> TradeFileMetadata:
         trades_df, mtm_df = parse_tradestation_trades(xlsx_path)
         if trades_df.is_empty():
             raise ValueError(f"No trades parsed from {xlsx_path.name}")
@@ -492,6 +492,7 @@ class IngestService:
         file_hash = _sha256_file(xlsx_path)
         file_id = file_hash[:12]
         data_version = os.getenv("DATA_VERSION")
+        filename = original_filename or os.path.basename(xlsx_path)
 
         self.trades_dir.mkdir(parents=True, exist_ok=True)
         self.mtm_dir.mkdir(parents=True, exist_ok=True)
@@ -526,7 +527,7 @@ class IngestService:
         symbol, interval, strategy = parse_filename_meta(str(xlsx_path))
         meta = TradeFileMetadata(
             file_id=file_id,
-            filename=os.path.basename(xlsx_path),
+            filename=filename,
             file_hash=file_hash,
             symbol=symbol,
             interval=interval,
