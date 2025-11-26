@@ -32,13 +32,16 @@ def parse_filename_meta(filename: str) -> tuple[str, int | None, str]:
     base = os.path.basename(filename)
     stem, _ = os.path.splitext(base)
     tokens = stem.split("_")
-    if len(tokens) >= 4 and tokens[0].lower().startswith("tradeslist"):
-        sym = tokens[1].upper()
+
+    # Support temporary prefixes (e.g., tmpabc_tradeslist_ES_15_strategy.xlsx)
+    start_idx = next((i for i, t in enumerate(tokens) if t.lower().startswith("tradeslist")), None)
+    if start_idx is not None and len(tokens) >= start_idx + 4:
+        sym = tokens[start_idx + 1].upper()
         try:
-            interval = int(tokens[2])
+            interval = int(tokens[start_idx + 2])
         except Exception:
             interval = None
-        strat = "_".join(tokens[3:])
+        strat = "_".join(tokens[start_idx + 3 :])
         return sym, interval, strat
     return "UNKNOWN", None, stem
 
