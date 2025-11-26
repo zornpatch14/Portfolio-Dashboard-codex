@@ -347,6 +347,18 @@ class DataStore:
         if series_name == "equity":
             return build_timeseries(view.equity, "equity", "equity")
 
+        if series_name in {"equity_percent", "equity-percent"}:
+            if view.equity.is_empty():
+                percent_frame = pl.DataFrame({"timestamp": [], "percent_equity": []})
+            else:
+                first = float(view.equity["equity"][0])
+                if first == 0:
+                    percent_frame = pl.DataFrame({"timestamp": [], "percent_equity": []})
+                else:
+                    percent_vals = ((view.equity["equity"] / first) - 1.0) * 100.0
+                    percent_frame = pl.DataFrame({"timestamp": view.equity["timestamp"], "percent_equity": percent_vals})
+            return build_timeseries(percent_frame, "percent_equity", "equity_percent")
+
         if series_name in {"drawdown", "intraday_drawdown"}:
             dd_values = _drawdown_from_equity(view.equity)
             frame = pl.DataFrame(dd_values, schema=["timestamp", "drawdown"]) if dd_values else pl.DataFrame(

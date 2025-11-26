@@ -22,6 +22,7 @@ def _series_endpoint(name: str) -> Callable:
 
 
 router.add_api_route("/equity", _series_endpoint("equity"), response_model=SeriesResponse, methods=["GET"])
+router.add_api_route("/equity-percent", _series_endpoint("equity_percent"), response_model=SeriesResponse, methods=["GET"])
 router.add_api_route("/drawdown", _series_endpoint("drawdown"), response_model=SeriesResponse, methods=["GET"])
 router.add_api_route("/intraday-dd", _series_endpoint("intraday_drawdown"), response_model=SeriesResponse, methods=["GET"])
 router.add_api_route("/netpos", _series_endpoint("netpos"), response_model=SeriesResponse, methods=["GET"])
