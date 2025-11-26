@@ -18,11 +18,6 @@ import {
   uploadFiles,
   getSelectionMeta,
   listFiles,
-  mockCorrelations,
-  mockCta,
-  mockHistogram,
-  mockOptimizer,
-  mockSeries,
   SeriesKind,
 } from '../lib/api';
 import { loadSampleSelections, Selection } from '../lib/selections';
@@ -414,55 +409,71 @@ export default function HomePage() {
 
       <div className="charts-grid" style={{ marginTop: 18 }}>
         <div className="card">
-          <SeriesChart title="Equity Curve" series={equityQuery.data ?? mockSeries(activeSelection, 'equity')} color="#4cc3ff" />
+          {equityQuery.data ? (
+            <SeriesChart title="Equity Curve" series={equityQuery.data} color="#4cc3ff" />
+          ) : (
+            <div className="placeholder-text">No equity data.</div>
+          )}
           <div className="text-muted small">
-            Points: {equityQuery.data?.downsampledCount ?? equityQuery.data?.points.length ?? 0}
+            Points: {equityQuery.data?.downsampled_count ?? equityQuery.data?.data.length ?? 0}
           </div>
         </div>
         <div className="card">
-          <SeriesChart
-            title="Percent Equity"
-            series={equityPctQuery.data ?? mockSeries(activeSelection, 'equityPercent')}
-            color="#8fe3c7"
-          />
+          {equityPctQuery.data ? (
+            <SeriesChart title="Percent Equity" series={equityPctQuery.data} color="#8fe3c7" />
+          ) : (
+            <div className="placeholder-text">No percent equity data.</div>
+          )}
           <div className="text-muted small">
-            Points: {equityPctQuery.data?.downsampledCount ?? equityPctQuery.data?.points.length ?? 0}
+            Points: {equityPctQuery.data?.downsampled_count ?? equityPctQuery.data?.data.length ?? 0}
           </div>
         </div>
         <div className="card">
-          <SeriesChart
-            title="Drawdown"
-            series={drawdownQuery.data ?? mockSeries(activeSelection, 'drawdown')}
-            color="#ff8f6b"
-          />
+          {drawdownQuery.data ? (
+            <SeriesChart title="Drawdown" series={drawdownQuery.data} color="#ff8f6b" />
+          ) : (
+            <div className="placeholder-text">No drawdown data.</div>
+          )}
           <div className="text-muted small">
-            Points: {drawdownQuery.data?.downsampledCount ?? drawdownQuery.data?.points.length ?? 0}
+            Points: {drawdownQuery.data?.downsampled_count ?? drawdownQuery.data?.data.length ?? 0}
           </div>
         </div>
         <div className="card">
-          <SeriesChart
-            title="Intraday Drawdown"
-            series={intradayDdQuery.data ?? mockSeries(activeSelection, 'intradayDrawdown')}
-            color="#f4c95d"
-          />
+          {intradayDdQuery.data ? (
+            <SeriesChart title="Intraday Drawdown" series={intradayDdQuery.data} color="#f4c95d" />
+          ) : (
+            <div className="placeholder-text">No intraday drawdown data.</div>
+          )}
           <div className="text-muted small">
-            Points: {intradayDdQuery.data?.downsampledCount ?? intradayDdQuery.data?.points.length ?? 0}
+            Points: {intradayDdQuery.data?.downsampled_count ?? intradayDdQuery.data?.data.length ?? 0}
           </div>
         </div>
         <div className="card">
-          <SeriesChart title="Net Position" series={netposQuery.data ?? mockSeries(activeSelection, 'netpos')} color="#9f8bff" />
+          {netposQuery.data ? (
+            <SeriesChart title="Net Position" series={netposQuery.data} color="#9f8bff" />
+          ) : (
+            <div className="placeholder-text">No net position data.</div>
+          )}
           <div className="text-muted small">
-            Points: {netposQuery.data?.downsampledCount ?? netposQuery.data?.points.length ?? 0}
+            Points: {netposQuery.data?.downsampled_count ?? netposQuery.data?.data.length ?? 0}
           </div>
         </div>
         <div className="card">
-          <SeriesChart title="Margin Usage" series={marginQuery.data ?? mockSeries(activeSelection, 'margin')} color="#54ffd0" />
+          {marginQuery.data ? (
+            <SeriesChart title="Margin Usage" series={marginQuery.data} color="#54ffd0" />
+          ) : (
+            <div className="placeholder-text">No margin data.</div>
+          )}
           <div className="text-muted small">
-            Points: {marginQuery.data?.downsampledCount ?? marginQuery.data?.points.length ?? 0}
+            Points: {marginQuery.data?.downsampled_count ?? marginQuery.data?.data.length ?? 0}
           </div>
         </div>
         <div className="card">
-          <HistogramChart histogram={histogramQuery.data ?? mockHistogram(activeSelection)} />
+          {histogramQuery.data ? (
+            <HistogramChart histogram={histogramQuery.data} />
+          ) : (
+            <div className="placeholder-text">No histogram data.</div>
+          )}
           <div className="text-muted small">
             Distribution: {histogramQuery.data?.buckets.length ?? 0} buckets
           </div>
@@ -1005,12 +1016,16 @@ export default function HomePage() {
       <div className="card" style={{ marginTop: 12 }}>
         <SeriesChart
           title="Intraday Drawdown"
-          series={intradayDdQuery.data ?? mockSeries(activeSelection, 'intradayDrawdown')}
-          color="#f4c95d"
-        />
-        <div className="text-muted small">
-          Points: {intradayDdQuery.data?.downsampledCount ?? intradayDdQuery.data?.points.length ?? 0}
-        </div>
+          {intradayDdQuery.data ? (
+            <>
+              <SeriesChart title="Intraday Drawdown" series={intradayDdQuery.data} color="#f4c95d" />
+              <div className="text-muted small">
+                Points: {intradayDdQuery.data?.downsampled_count ?? intradayDdQuery.data?.data.length ?? 0}
+              </div>
+            </>
+          ) : (
+            <div className="placeholder-text">No intraday drawdown data.</div>
+          )}
       </div>
     </div>
   );
