@@ -277,23 +277,41 @@ export function mockCta(selection: Selection): CTAResponse {
 
 export async function fetchSeries(selection: Selection, kind: SeriesKind) {
   const query = selectionQuery(selection);
-  const fallback = mockSeries(selection, kind);
   const path = `${endpoint[kind]}?${query}`;
-  return fetchJson<SeriesResponse>(path, fallback);
+  if (!API_BASE) {
+    throw new Error('NEXT_PUBLIC_API_BASE is not set; cannot load series data');
+  }
+  const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return (await response.json()) as SeriesResponse;
 }
 
 export async function fetchMetrics(selection: Selection) {
   const query = selectionQuery(selection);
-  const fallback = mockMetrics(selection);
   const path = `${endpoint.metrics}?${query}`;
-  return fetchJson<MetricsRow[]>(path, fallback);
+  if (!API_BASE) {
+    throw new Error('NEXT_PUBLIC_API_BASE is not set; cannot load metrics');
+  }
+  const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return (await response.json()) as MetricsRow[];
 }
 
 export async function fetchHistogram(selection: Selection) {
   const query = selectionQuery(selection);
-  const fallback = mockHistogram(selection);
   const path = `${endpoint.histogram}?${query}`;
-  return fetchJson<HistogramResponse>(path, fallback);
+  if (!API_BASE) {
+    throw new Error('NEXT_PUBLIC_API_BASE is not set; cannot load histogram');
+  }
+  const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return (await response.json()) as HistogramResponse;
 }
 
 export async function fetchCorrelations(selection: Selection, mode: string = 'drawdown_pct') {

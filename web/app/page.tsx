@@ -54,6 +54,7 @@ export default function HomePage() {
   const [plotHistogramEnabled, setPlotHistogramEnabled] = useState<Record<string, boolean>>({});
   const [riskfolioMode, setRiskfolioMode] = useState<'mean-risk' | 'risk-parity' | 'hierarchical'>('mean-risk');
   const apiBase = process.env.NEXT_PUBLIC_API_BASE;
+  const apiMissing = !apiBase;
 
   const availableFiles = useMemo(
     () => Array.from(new Set(selections.flatMap((s) => s.files))).sort(),
@@ -1576,7 +1577,7 @@ export default function HomePage() {
                 </span>
               ) : (
                 <span>
-                  <span className="status-dot" style={{ background: '#ffcb6b' }} /> Using mock data until NEXT_PUBLIC_API_BASE is set
+                  <span className="status-dot" style={{ background: '#ffcb6b' }} /> API base not configured; set NEXT_PUBLIC_API_BASE to load live data
                 </span>
               )}
             </div>
@@ -1603,6 +1604,14 @@ export default function HomePage() {
           </button>
         </div>
       </div>
+
+      {apiMissing && (
+        <div className="panel" style={{ borderColor: '#ffcb6b', background: 'rgba(255, 203, 107, 0.06)' }}>
+          <div className="text-muted small">
+            Live uploads, series, metrics, and histogram calls are disabled until NEXT_PUBLIC_API_BASE is set.
+          </div>
+        </div>
+      )}
 
       <div className="panel" style={{ overflow: 'hidden' }}>
         <div className="tabs">
