@@ -58,6 +58,7 @@ export default function HomePage() {
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const apiBase = process.env.NEXT_PUBLIC_API_BASE;
   const apiMissing = !apiBase;
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -99,8 +100,9 @@ export default function HomePage() {
           const labels = Object.fromEntries(meta.files.map((f) => [f.file_id, f.filename]));
           setActiveSelection((prev) => ({ ...prev, fileIds: ids, fileLabels: labels, files: ids }));
         }
-      } catch (error) {
+      } catch (error: any) {
         console.warn('Failed to load selection metadata', error);
+        setErrorMessage(error?.message || 'Failed to load selection metadata');
       }
     })();
   }, [apiMissing]);
@@ -1265,7 +1267,7 @@ export default function HomePage() {
                 }));
               } catch (error) {
                 setUploadStatus('Upload failed');
-                console.error('Upload error', error);
+                setErrorMessage(error instanceof Error ? error.message : 'Upload failed');
               } finally {
                 if (event.target) {
                   event.target.value = '';
@@ -1474,6 +1476,21 @@ export default function HomePage() {
 
   return (
     <div className="page">
+      {errorMessage && (
+        <div className="panel" style={{ borderColor: '#ff6b6b', background: 'rgba(255, 107, 107, 0.08)' }}>
+          <div className="text-muted small">
+            {errorMessage}
+            <button
+              type="button"
+              className="button"
+              style={{ marginLeft: 10 }}
+              onClick={() => setErrorMessage(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       <div className="panel" style={{ marginBottom: 12 }}>
         <div className="flex gap-sm" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
