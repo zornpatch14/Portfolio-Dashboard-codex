@@ -39,6 +39,34 @@ export type CorrelationResponse = {
   notes: string[];
 };
 
+export type FileMetadata = {
+  file_id: string;
+  filename: string;
+  symbols: string[];
+  intervals: string[];
+  strategies: string[];
+  date_min?: string | null;
+  date_max?: string | null;
+  mtm_available: boolean;
+  margin_per_contract?: number | null;
+  big_point_value?: number | null;
+};
+
+export type FileUploadResponse = {
+  job_id: string;
+  files: FileMetadata[];
+  message?: string;
+};
+
+export type SelectionMeta = {
+  symbols: string[];
+  intervals: string[];
+  strategies: string[];
+  date_min?: string | null;
+  date_max?: string | null;
+  files: FileMetadata[];
+};
+
 export type OptimizerResult = {
   summary: {
     objective: string;
@@ -90,6 +118,9 @@ const endpoint: Record<SeriesKind | 'metrics' | 'histogram', string> = {
 const correlationEndpoint = '/api/v1/correlations';
 const ctaEndpoint = '/api/v1/cta';
 const optimizerEndpoint = '/api/v1/optimizer/allocator';
+const filesEndpoint = '/api/v1/files';
+const selectionMetaEndpoint = '/api/v1/selection/meta';
+const uploadEndpoint = '/api/v1/upload';
 
 async function fetchJson<T>(path: string, fallback: T): Promise<T> {
   if (!API_BASE) return fallback;
@@ -333,4 +364,40 @@ export async function fetchCta(selection: Selection) {
   const fallback = mockCta(selection);
   const path = `${ctaEndpoint}?${query}`;
   return fetchJson<CTAResponse>(path, fallback);
+}
+
+export async function listFiles(): Promise<FileMetadata[]> {
+  if (!API_BASE) {
+    throw new Error('NEXT_PUBLIC_API_BASE is not set; cannot load files');
+  }
+  const response = await fetch(`${API_BASE}${filesEndpoint}`, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return (await response.json()) as FileMetadata[];
+}
+
+export async function getSelectionMeta(): Promise<SelectionMeta> {
+  if (!API_BASE) {
+    throw new Error('NEXT_PUBLIC_API_BASE is not set; cannot load selection metadata');
+  }
+  const response = await fetch(`${API_BASE}${selectionMetaEndpoint}`, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return (await response.json()) as SelectionMeta;
+}
+
+export async function uploadFiles(formData: FormData): Promise<FileUploadResponse> {
+  if (!API_BASE) {
+    throw new Error('NEXT_PUBLIC_API_BASE is not set; cannot upload files');
+  }
+  const response = await fetch(`${API_BASE}${uploadEndpoint}`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error(`Upload failed: ${response.status}`);
+  }
+  return (await response.json()) as FileUploadResponse;
 }
