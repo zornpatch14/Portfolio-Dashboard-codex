@@ -14,8 +14,9 @@ router = APIRouter(prefix="/api/v1/series", tags=["series"])
 def _series_endpoint(name: str) -> Callable:
     async def handler(
         selection=Depends(get_selection),
-        downsample: bool = Depends(DownsampleFlag),
+        downsample_flag: DownsampleFlag = Depends(DownsampleFlag),
     ) -> SeriesResponse:
+        downsample = downsample_flag()
         return store.series(name, selection, downsample)
 
     return handler

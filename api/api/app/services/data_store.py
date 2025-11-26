@@ -234,19 +234,25 @@ class DataStore:
 
     def _persist_portfolio_to_cache(self, cache_key: str, view: PortfolioView) -> None:
         try:
-            payload = {
-                "equity": view.equity.write_parquet(),
-                "daily_returns": view.daily_returns.write_parquet(),
-                "net_position": view.net_position.write_parquet(),
-                "margin": view.margin.write_parquet(),
-                "contributors": [str(p) for p in view.contributors],
-                "spikes": view.spikes.write_parquet() if view.spikes is not None else None,
-            }
+            import io
+            import base64
             import json
 
-            # Parquet bytes are not JSON serializable; store as a dict of base64-encoded bytes.
-            import base64
+            def to_bytes(frame: pl.DataFrame) -> bytes:
+                buf = io.BytesIO()
+                frame.write_parquet(buf)
+                return buf.getvalue()
 
+            payload = {
+                "equity": to_bytes(view.equity),
+                "daily_returns": to_bytes(view.daily_returns),
+                "net_position": to_bytes(view.net_position),
+                "margin": to_bytes(view.margin),
+                "contributors": [str(p) for p in view.contributors],
+                "spikes": to_bytes(view.spikes) if view.spikes is not None else None,
+            }
+
+            # Parquet bytes are not JSON serializable; store as a dict of base64-encoded bytes.
             encoded = {
                 "equity": base64.b64encode(payload["equity"]).decode(),
                 "daily_returns": base64.b64encode(payload["daily_returns"]).decode(),
