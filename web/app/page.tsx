@@ -120,6 +120,19 @@ export default function HomePage() {
     [filesMeta],
   );
 
+  // Keep selection files aligned with files reported by the API.
+  useEffect(() => {
+    if (!filesMeta.length) return;
+    const ids = filesMeta.map((f) => f.file_id);
+    setActiveSelection((prev) => {
+      const current = prev.fileIds && prev.fileIds.length ? prev.fileIds : prev.files;
+      const filtered = current.filter((id) => ids.includes(id));
+      const nextFiles = filtered.length ? filtered : ids;
+      const labels = Object.fromEntries(filesMeta.map((f) => [f.file_id, f.filename]));
+      return { ...prev, fileIds: nextFiles, files: nextFiles, fileLabels: labels };
+    });
+  }, [filesMeta]);
+
   const seriesKinds: SeriesKind[] = ['equity', 'equityPercent', 'drawdown', 'intradayDrawdown', 'netpos', 'margin'];
 
   const [
