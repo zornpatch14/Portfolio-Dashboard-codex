@@ -3,14 +3,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from ..dependencies import SelectionQueryParams
+from ..dependencies import get_selection
 from ..services.stub_store import store
 
 router = APIRouter(prefix="/api/v1/export", tags=["exports"])
 
 
 @router.get("/trades")
-async def export_trades(selection=Depends(SelectionQueryParams)):
+async def export_trades(selection=Depends(get_selection)):
     filename, content = store.export_rows(selection, kind="trades")
     return StreamingResponse(
         iter([content]),
@@ -20,7 +20,7 @@ async def export_trades(selection=Depends(SelectionQueryParams)):
 
 
 @router.get("/metrics")
-async def export_metrics(selection=Depends(SelectionQueryParams)):
+async def export_metrics(selection=Depends(get_selection)):
     filename, content = store.export_rows(selection, kind="metrics")
     return StreamingResponse(
         iter([content]),

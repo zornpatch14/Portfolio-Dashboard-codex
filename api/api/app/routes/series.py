@@ -4,7 +4,7 @@ from typing import Callable
 
 from fastapi import APIRouter, Depends
 
-from ..dependencies import DownsampleFlag, SelectionQueryParams
+from ..dependencies import DownsampleFlag, get_selection
 from ..schemas import HistogramResponse, SeriesResponse
 from ..services.data_store import store
 
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/v1/series", tags=["series"])
 
 def _series_endpoint(name: str) -> Callable:
     async def handler(
-        selection=Depends(SelectionQueryParams),
+        selection=Depends(get_selection),
         downsample: bool = Depends(DownsampleFlag),
     ) -> SeriesResponse:
         return store.series(name, selection, downsample)
@@ -27,5 +27,5 @@ router.add_api_route("/intraday-dd", _series_endpoint("intraday_drawdown"), resp
 router.add_api_route("/netpos", _series_endpoint("netpos"), response_model=SeriesResponse, methods=["GET"])
 router.add_api_route("/margin", _series_endpoint("margin"), response_model=SeriesResponse, methods=["GET"])
 @router.get("/histogram", response_model=HistogramResponse)
-async def histogram(selection=Depends(SelectionQueryParams)) -> HistogramResponse:  # type: ignore[override]
+async def histogram(selection=Depends(get_selection)) -> HistogramResponse:  # type: ignore[override]
     return store.histogram(selection)

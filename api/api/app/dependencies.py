@@ -3,7 +3,7 @@ import json
 from datetime import date
 from typing import Dict, Iterable, Optional
 
-from fastapi import HTTPException, Query, status
+from fastapi import Depends, HTTPException, Query, status
 
 from .schemas import Selection
 
@@ -101,6 +101,11 @@ class DownsampleFlag:
 
     def __call__(self) -> bool:
         return self.downsample
+
+
+def get_selection(params: SelectionQueryParams = Depends(SelectionQueryParams)) -> Selection:
+    """Extract the Selection model from the query param helper."""
+    return params.selection
 
 
 def selection_hash(selection: Selection) -> str:
