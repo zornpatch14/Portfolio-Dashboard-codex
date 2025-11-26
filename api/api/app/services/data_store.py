@@ -40,9 +40,10 @@ def _meta_to_schema(meta: TradeFileMetadata) -> FileMetadata:
     intervals: list[str] = []
     if meta.interval is not None:
         intervals = [str(meta.interval)]
+    display_name = meta.original_filename or meta.filename
     return FileMetadata(
         file_id=meta.file_id,
-        filename=meta.filename,
+        filename=display_name,
         symbols=[meta.symbol] if meta.symbol else [],
         intervals=intervals,
         strategies=[meta.strategy] if meta.strategy else [],
