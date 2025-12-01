@@ -26,6 +26,7 @@ export type SeriesResponse = {
 
 type RawSeriesResponse = Omit<SeriesResponse, 'perFile'> & {
   per_file?: SeriesContributor[];
+  perFile?: SeriesContributor[];
 };
 
 export type HistogramBucket = {
@@ -162,6 +163,20 @@ function seeded(seed: string) {
     h ^= h << 5;
     return Math.abs(h) / 0x7fffffff;
   };
+}
+
+const NO_DATA_ERROR_CODE = 'NO_DATA';
+const NO_DATA_ERROR_MESSAGE = 'No data matches your selection';
+
+type CodedError = Error & { code?: string };
+
+function raiseResponseError(response: Response): never {
+  if (response.status === 404) {
+    const error = new Error(NO_DATA_ERROR_MESSAGE) as CodedError;
+    error.code = NO_DATA_ERROR_CODE;
+    throw error;
+  }
+  throw new Error(`Request failed: ${response.status}`);
 }
 
 function selectionQuery(selection: Selection, opts?: { downsample?: boolean }) {
@@ -349,7 +364,7 @@ export async function fetchSeries(selection: Selection, kind: SeriesKind, downsa
   }
   const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    raiseResponseError(response);
   }
   const payload = (await response.json()) as RawSeriesResponse;
   const { per_file, perFile, ...rest } = payload as RawSeriesResponse & { per_file?: SeriesContributor[] };
@@ -367,7 +382,7 @@ export async function fetchMetrics(selection: Selection) {
   }
   const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    raiseResponseError(response);
   }
   return (await response.json()) as MetricsRow[];
 }
@@ -380,7 +395,7 @@ export async function fetchHistogram(selection: Selection) {
   }
   const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    raiseResponseError(response);
   }
   return (await response.json()) as HistogramResponse;
 }

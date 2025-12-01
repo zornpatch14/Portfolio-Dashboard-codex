@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import MetricsGrid from '../components/MetricsGrid';
 import SeriesChart from '../components/SeriesChart';
 import { HistogramChart } from '../components/HistogramChart';
@@ -41,6 +41,13 @@ const tabs = [
   { key: 'metrics', label: 'Metrics' },
   { key: 'inverse-volatility', label: 'Inverse Volatility' },
 ] as const;
+const NO_DATA_MESSAGE = 'No data matches your selection.';
+const GENERIC_ERROR_MESSAGE = 'Failed to load data.';
+
+const isNoDataError = (error: unknown): boolean => Boolean(error && (error as any).code === 'NO_DATA');
+
+const getQueryErrorMessage = (error: unknown, fallback?: string) =>
+  isNoDataError(error) ? NO_DATA_MESSAGE : fallback || GENERIC_ERROR_MESSAGE;
 
 type TabKey = (typeof tabs)[number]['key'];
 
@@ -180,13 +187,13 @@ export default function HomePage() {
 
       const symbolMatch =
         !normalizedSymbols.length ||
-        (fileSymbols.length && fileSymbols.some((symbol) => normalizedSymbols.includes(symbol?.toUpperCase?.() || symbol)));
+        (fileSymbols.length && fileSymbols.some((symbol) => normalizedSymbols.includes(symbol.toUpperCase())));
       const intervalMatch =
         !normalizedIntervals.length ||
         (fileIntervals.length && fileIntervals.some((interval) => normalizedIntervals.includes(String(interval))));
       const strategyMatch =
         !normalizedStrategies.length ||
-        (fileStrategies.length && fileStrategies.some((strategy) => normalizedStrategies.includes(strategy?.toUpperCase?.() || strategy)));
+        (fileStrategies.length && fileStrategies.some((strategy) => normalizedStrategies.includes(strategy.toUpperCase())));
 
       return symbolMatch && intervalMatch && strategyMatch;
     },
@@ -202,32 +209,37 @@ export default function HomePage() {
 
   const selectionForFetch = useMemo(() => ({ ...activeSelection, files: filteredFileIds }), [activeSelection, filteredFileIds]);
 
-  const seriesKinds: SeriesKind[] = ['equity', 'equityPercent', 'drawdown', 'intradayDrawdown', 'netpos', 'margin'];
-
-  const [
-    equityQuery,
-    equityPctQuery,
-    drawdownQuery,
-    intradayDdQuery,
-    netposQuery,
-    marginQuery,
-    histogramQuery,
-    metricsQuery,
-  ] = useQueries({
-    queries: [
-      ...seriesKinds.map((kind) => ({
-        queryKey: [kind, selectionForFetch.name, filteredFileIds.join(',')],
-        queryFn: () => fetchSeries(selectionForFetch, kind, includeDownsample),
-      })),
-      {
-        queryKey: ['histogram', selectionForFetch.name, filteredFileIds.join(',')],
-        queryFn: () => fetchHistogram(selectionForFetch),
-      },
-      {
-        queryKey: ['metrics', selectionForFetch.name, filteredFileIds.join(',')],
-        queryFn: () => fetchMetrics(selectionForFetch),
-      },
-    ],
+  const equityQuery = useQuery({
+    queryKey: ['equity', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryFn: () => fetchSeries(selectionForFetch, 'equity', includeDownsample),
+  });
+  const equityPctQuery = useQuery({
+    queryKey: ['equityPercent', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryFn: () => fetchSeries(selectionForFetch, 'equityPercent', includeDownsample),
+  });
+  const drawdownQuery = useQuery({
+    queryKey: ['drawdown', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryFn: () => fetchSeries(selectionForFetch, 'drawdown', includeDownsample),
+  });
+  const intradayDdQuery = useQuery({
+    queryKey: ['intradayDrawdown', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryFn: () => fetchSeries(selectionForFetch, 'intradayDrawdown', includeDownsample),
+  });
+  const netposQuery = useQuery({
+    queryKey: ['netpos', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryFn: () => fetchSeries(selectionForFetch, 'netpos', includeDownsample),
+  });
+  const marginQuery = useQuery({
+    queryKey: ['margin', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryFn: () => fetchSeries(selectionForFetch, 'margin', includeDownsample),
+  });
+  const histogramQuery = useQuery({
+    queryKey: ['histogram', selectionForFetch.name, filteredFileIds.join(',')],
+    queryFn: () => fetchHistogram(selectionForFetch),
+  });
+  const metricsQuery = useQuery({
+    queryKey: ['metrics', selectionForFetch.name, filteredFileIds.join(',')],
+    queryFn: () => fetchMetrics(selectionForFetch),
   });
 
   useEffect(() => {
@@ -504,7 +516,9 @@ export default function HomePage() {
 
       <div className="charts-grid" style={{ marginTop: 18 }}>
         <div className="card">
-          {equityQuery.data ? (
+          {equityQuery.isError ? (
+            <div className="placeholder-text">{getQueryErrorMessage(equityQuery.error)}</div>
+          ) : equityQuery.data ? (
             <SeriesChart title="Equity Curve" series={equityQuery.data} color="#4cc3ff" />
           ) : (
             <div className="placeholder-text">No equity data.</div>
@@ -514,7 +528,9 @@ export default function HomePage() {
           </div>
         </div>
         <div className="card">
-          {equityPctQuery.data ? (
+          {equityPctQuery.isError ? (
+            <div className="placeholder-text">{getQueryErrorMessage(equityPctQuery.error)}</div>
+          ) : equityPctQuery.data ? (
             <SeriesChart title="Percent Equity" series={equityPctQuery.data} color="#8fe3c7" />
           ) : (
             <div className="placeholder-text">No percent equity data.</div>
@@ -524,7 +540,9 @@ export default function HomePage() {
           </div>
         </div>
         <div className="card">
-          {drawdownQuery.data ? (
+          {drawdownQuery.isError ? (
+            <div className="placeholder-text">{getQueryErrorMessage(drawdownQuery.error)}</div>
+          ) : drawdownQuery.data ? (
             <SeriesChart title="Drawdown" series={drawdownQuery.data} color="#ff8f6b" />
           ) : (
             <div className="placeholder-text">No drawdown data.</div>
@@ -534,7 +552,9 @@ export default function HomePage() {
           </div>
         </div>
         <div className="card">
-          {intradayDdQuery.data ? (
+          {intradayDdQuery.isError ? (
+            <div className="placeholder-text">{getQueryErrorMessage(intradayDdQuery.error)}</div>
+          ) : intradayDdQuery.data ? (
             <SeriesChart title="Intraday Drawdown" series={intradayDdQuery.data} color="#f4c95d" />
           ) : (
             <div className="placeholder-text">No intraday drawdown data.</div>
@@ -544,7 +564,9 @@ export default function HomePage() {
           </div>
         </div>
         <div className="card">
-          {netposQuery.data ? (
+          {netposQuery.isError ? (
+            <div className="placeholder-text">{getQueryErrorMessage(netposQuery.error)}</div>
+          ) : netposQuery.data ? (
             <SeriesChart title="Net Position" series={netposQuery.data} color="#9f8bff" />
           ) : (
             <div className="placeholder-text">No net position data.</div>
@@ -554,7 +576,9 @@ export default function HomePage() {
           </div>
         </div>
         <div className="card">
-          {marginQuery.data ? (
+          {marginQuery.isError ? (
+            <div className="placeholder-text">{getQueryErrorMessage(marginQuery.error)}</div>
+          ) : marginQuery.data ? (
             <SeriesChart title="Margin Usage" series={marginQuery.data} color="#54ffd0" />
           ) : (
             <div className="placeholder-text">No margin data.</div>
@@ -564,7 +588,9 @@ export default function HomePage() {
           </div>
         </div>
         <div className="card">
-          {histogramQuery.data ? (
+          {histogramQuery.isError ? (
+            <div className="placeholder-text">{getQueryErrorMessage(histogramQuery.error)}</div>
+          ) : histogramQuery.data ? (
             <HistogramChart histogram={histogramQuery.data} />
           ) : (
             <div className="placeholder-text">No histogram data.</div>
@@ -577,7 +603,9 @@ export default function HomePage() {
 
       <div style={{ marginTop: 18 }}>
         <h3 className="section-title">Per-file metrics</h3>
-        {metricsQuery.data && metricsQuery.data.length ? (
+        {metricsQuery.isError ? (
+          <div className="placeholder-text">{getQueryErrorMessage(metricsQuery.error)}</div>
+        ) : metricsQuery.data && metricsQuery.data.length ? (
           <MetricsGrid rows={metricsQuery.data} />
         ) : (
           <div className="placeholder-text">No metrics returned yet.</div>
@@ -1109,7 +1137,9 @@ export default function HomePage() {
         {activeBadge}
       </div>
       <div className="card" style={{ marginTop: 12 }}>
-        {intradayDdQuery.data ? (
+        {intradayDdQuery.isError ? (
+          <div className="placeholder-text">{getQueryErrorMessage(intradayDdQuery.error)}</div>
+        ) : intradayDdQuery.data ? (
           <>
             <SeriesChart title="Intraday Drawdown" series={intradayDdQuery.data} color="#f4c95d" />
             <div className="text-muted small">
@@ -1216,7 +1246,7 @@ export default function HomePage() {
 
       {(() => {
         const activeHists = histogramData.filter((h) => plotHistogramEnabled[h.name] !== false);
-        const bucketOrder = activeHists[0]?.buckets.map((b) => b.bucket) ?? [];
+        const bucketOrder = (activeHists[0]?.buckets ?? []).map((bucketItem) => bucketItem.bucket);
         const bucketMap = new Map(bucketOrder.map((b) => [b, 0]));
         activeHists.forEach((hist) => {
           hist.buckets.forEach((bucket) => {
@@ -1269,7 +1299,9 @@ export default function HomePage() {
         {activeBadge}
       </div>
       <div style={{ marginTop: 12 }}>
-        {metricsQuery.data && metricsQuery.data.length ? (
+        {metricsQuery.isError ? (
+          <div className="placeholder-text">{getQueryErrorMessage(metricsQuery.error)}</div>
+        ) : metricsQuery.data && metricsQuery.data.length ? (
           <MetricsGrid rows={metricsQuery.data} />
         ) : (
           <div className="placeholder-text">No metrics returned yet.</div>
