@@ -21,7 +21,11 @@ export type SeriesResponse = {
   raw_count?: number;
   downsampled_count?: number;
   portfolio: SeriesPoint[];
-  per_file: SeriesContributor[];
+  perFile: SeriesContributor[];
+};
+
+type RawSeriesResponse = Omit<SeriesResponse, 'perFile'> & {
+  per_file?: SeriesContributor[];
 };
 
 export type HistogramBucket = {
@@ -227,7 +231,7 @@ export function mockSeries(selection: Selection, kind: SeriesKind): SeriesRespon
   return {
     series: `${labelByKind[kind]} (${selection.name})`,
     portfolio: points,
-    per_file: perFile,
+    perFile,
     downsampled: false,
     raw_count: points.length,
     downsampled_count: points.length,
@@ -349,7 +353,12 @@ export async function fetchSeries(selection: Selection, kind: SeriesKind, downsa
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
   }
-  return (await response.json()) as SeriesResponse;
+  const payload = (await response.json()) as RawSeriesResponse;
+  const { per_file, perFile, ...rest } = payload as RawSeriesResponse & { per_file?: SeriesContributor[] };
+  return {
+    ...rest,
+    perFile: perFile ?? per_file ?? [],
+  };
 }
 
 export async function fetchMetrics(selection: Selection) {

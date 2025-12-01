@@ -192,7 +192,7 @@ export default function HomePage() {
 
   const equityLines = useMemo(() => {
     const portfolioPoints = (equityQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-    const perFile = (equityQuery.data?.per_file ?? []).map((line) => ({
+    const perFile = (equityQuery.data?.perFile ?? []).map((line) => ({
       name: line.label || line.contributor_id,
       points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
     }));
@@ -201,7 +201,7 @@ export default function HomePage() {
 
   const equityPercentLines = useMemo(() => {
     const portfolioPoints = (equityPctQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-    const perFile = (equityPctQuery.data?.per_file ?? []).map((line) => ({
+    const perFile = (equityPctQuery.data?.perFile ?? []).map((line) => ({
       name: line.label || line.contributor_id,
       points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
     }));
@@ -227,7 +227,7 @@ export default function HomePage() {
 
   const drawdownLines = useMemo(() => {
     const portfolioPoints = (drawdownQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-    const perFile = (drawdownQuery.data?.per_file ?? []).map((line) => ({
+    const perFile = (drawdownQuery.data?.perFile ?? []).map((line) => ({
       name: line.label || line.contributor_id,
       points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
     }));
@@ -263,7 +263,7 @@ export default function HomePage() {
 
   const marginLines = useMemo(() => {
     const portfolioPoints = (marginQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-    const perFile = (marginQuery.data?.per_file ?? []).map((line) => ({
+    const perFile = (marginQuery.data?.perFile ?? []).map((line) => ({
       name: line.label || line.contributor_id,
       points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
     }));
@@ -272,7 +272,7 @@ export default function HomePage() {
 
   const netposLines = useMemo(() => {
     const portfolioPoints = (netposQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-    const perFile = (netposQuery.data?.per_file ?? []).map((line) => ({
+    const perFile = (netposQuery.data?.perFile ?? []).map((line) => ({
       name: line.label || line.contributor_id,
       points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
     }));
