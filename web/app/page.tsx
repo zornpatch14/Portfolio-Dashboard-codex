@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import MetricsGrid from '../components/MetricsGrid';
 import SeriesChart from '../components/SeriesChart';
@@ -120,6 +120,25 @@ export default function HomePage() {
     [filesMeta],
   );
 
+  const deriveFileMeta = useMemo(() => {
+    return (fileId: string) => {
+      const label = fileLabelMap[fileId] || fileId;
+      const base = label.split('/').pop() || label;
+      const parts = base.replace(/\.[^.]+$/, '').split('_');
+      return {
+        symbol: parts[1] || '',
+        interval: parts[2] || '',
+        strategy: parts.slice(3).join('_') || '',
+      };
+    };
+  }, [fileLabelMap]);
+
+  const fileMetaMap = useMemo(() => {
+    const map = new Map<string, (typeof filesMeta)[number]>();
+    filesMeta.forEach((file) => map.set(file.file_id, file));
+    return map;
+  }, [filesMeta]);
+
   // Keep selection files aligned with files reported by the API.
   useEffect(() => {
     if (!filesMeta.length) return;
@@ -132,6 +151,56 @@ export default function HomePage() {
       return { ...prev, files: nextFiles, fileLabels: labels };
     });
   }, [filesMeta]);
+
+  const matchesFilters = useCallback(
+    (fileId: string) => {
+      const normalizedSymbols = activeSelection.symbols.map((symbol) => symbol.toUpperCase());
+      const normalizedIntervals = activeSelection.intervals.map((interval) => String(interval));
+      const normalizedStrategies = activeSelection.strategies.map((strategy) => strategy.toUpperCase());
+      const meta = fileMetaMap.get(fileId);
+      const fallback = deriveFileMeta(fileId);
+      const fileSymbols =
+        meta && meta.symbols.length
+          ? meta.symbols
+          : fallback.symbol
+            ? [fallback.symbol]
+            : [];
+      const fileIntervals =
+        meta && meta.intervals.length
+          ? meta.intervals
+          : fallback.interval
+            ? [fallback.interval]
+            : [];
+      const fileStrategies =
+        meta && meta.strategies.length
+          ? meta.strategies
+          : fallback.strategy
+            ? [fallback.strategy]
+            : [];
+
+      const symbolMatch =
+        !normalizedSymbols.length ||
+        (fileSymbols.length && fileSymbols.some((symbol) => normalizedSymbols.includes(symbol?.toUpperCase?.() || symbol)));
+      const intervalMatch =
+        !normalizedIntervals.length ||
+        (fileIntervals.length && fileIntervals.some((interval) => normalizedIntervals.includes(String(interval))));
+      const strategyMatch =
+        !normalizedStrategies.length ||
+        (fileStrategies.length && fileStrategies.some((strategy) => normalizedStrategies.includes(strategy?.toUpperCase?.() || strategy)));
+
+      return symbolMatch && intervalMatch && strategyMatch;
+    },
+    [activeSelection.symbols, activeSelection.intervals, activeSelection.strategies, deriveFileMeta, fileMetaMap],
+  );
+
+  const filteredFileIds = useMemo(() => {
+    if (!activeSelection.files || !activeSelection.files.length) return [];
+    return activeSelection.files.filter((fileId) => matchesFilters(fileId));
+  }, [activeSelection.files, matchesFilters]);
+
+  const filteredFileSet = useMemo(() => new Set(filteredFileIds), [filteredFileIds]);
+
+  const selectionForFetch = useMemo(() => ({ ...activeSelection, files: filteredFileIds }), [activeSelection, filteredFileIds]);
 
   const seriesKinds: SeriesKind[] = ['equity', 'equityPercent', 'drawdown', 'intradayDrawdown', 'netpos', 'margin'];
 
@@ -147,16 +216,16 @@ export default function HomePage() {
   ] = useQueries({
     queries: [
       ...seriesKinds.map((kind) => ({
-        queryKey: [kind, activeSelection.name, activeSelection.files.join(',')],
-        queryFn: () => fetchSeries(activeSelection, kind, includeDownsample),
+        queryKey: [kind, selectionForFetch.name, filteredFileIds.join(',')],
+        queryFn: () => fetchSeries(selectionForFetch, kind, includeDownsample),
       })),
       {
-        queryKey: ['histogram', activeSelection.name, activeSelection.files.join(',')],
-        queryFn: () => fetchHistogram(activeSelection),
+        queryKey: ['histogram', selectionForFetch.name, filteredFileIds.join(',')],
+        queryFn: () => fetchHistogram(selectionForFetch),
       },
       {
-        queryKey: ['metrics', activeSelection.name, activeSelection.files.join(',')],
-        queryFn: () => fetchMetrics(activeSelection),
+        queryKey: ['metrics', selectionForFetch.name, filteredFileIds.join(',')],
+        queryFn: () => fetchMetrics(selectionForFetch),
       },
     ],
   });
@@ -176,19 +245,6 @@ export default function HomePage() {
       return { ...prev, start: nextStart, end: nextEnd };
     });
   }, [equityQuery.data, activeSelection.name]);
-
-  const deriveFileMeta = useMemo(() => {
-    return (fileId: string) => {
-      const label = fileLabelMap[fileId] || fileId;
-      const base = label.split('/').pop() || label;
-      const parts = base.replace(/\.[^.]+$/, '').split('_');
-      return {
-        symbol: parts[1] || '',
-        interval: parts[2] || '',
-        strategy: parts.slice(3).join('_') || '',
-      };
-    };
-  }, [fileLabelMap]);
 
   const equityLines = useMemo(() => {
     const portfolioPoints = (equityQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
@@ -360,21 +416,21 @@ export default function HomePage() {
   }, [histogramData]);
 
   const correlationQuery = useQuery({
-    queryKey: ['correlations', activeSelection.name, activeSelection.files.join(','), corrMode],
-    queryFn: () => fetchCorrelations(activeSelection, corrMode),
-    initialData: mockCorrelations(activeSelection, corrMode),
+    queryKey: ['correlations', selectionForFetch.name, filteredFileIds.join(','), corrMode],
+    queryFn: () => fetchCorrelations(selectionForFetch, corrMode),
+    initialData: mockCorrelations(selectionForFetch, corrMode),
   });
 
   const optimizerQuery = useQuery({
-    queryKey: ['optimizer', activeSelection.name, activeSelection.files.join(',')],
-    queryFn: () => fetchOptimizer(activeSelection),
-    initialData: mockOptimizer(activeSelection),
+    queryKey: ['optimizer', selectionForFetch.name, filteredFileIds.join(',')],
+    queryFn: () => fetchOptimizer(selectionForFetch),
+    initialData: mockOptimizer(selectionForFetch),
   });
 
   const ctaQuery = useQuery({
-    queryKey: ['cta', activeSelection.name, activeSelection.files.join(',')],
-    queryFn: () => fetchCta(activeSelection),
-    initialData: mockCta(activeSelection),
+    queryKey: ['cta', selectionForFetch.name, filteredFileIds.join(',')],
+    queryFn: () => fetchCta(selectionForFetch),
+    initialData: mockCta(selectionForFetch),
   });
 
   const metricsSummary = useMemo(() => {
@@ -438,7 +494,7 @@ export default function HomePage() {
         </div>
         <div className="metric-card">
           <span className="text-muted small">Files</span>
-          <strong>{activeSelection.files.length}</strong>
+          <strong>{filteredFileIds.length}</strong>
         </div>
         <div className="metric-card">
           <span className="text-muted small">Account Equity</span>
@@ -1352,6 +1408,8 @@ export default function HomePage() {
               const active = activeSelection.files.includes(fileId);
               const contractValue = activeSelection.contracts[fileId] ?? 1;
               const marginValue = activeSelection.margins[fileId] ?? '';
+              const filteredIn = filteredFileSet.has(fileId);
+              const filteredOut = active && !filteredIn;
               return (
                 <div
                   key={fileId}
@@ -1367,13 +1425,14 @@ export default function HomePage() {
                   <button
                     type="button"
                     className={`chip ${active ? 'chip-active' : ''}`}
+                    title={filteredOut ? 'Excluded by current filters' : undefined}
                     onClick={() =>
                       setActiveSelection((prev) => ({
                         ...prev,
                         files: active ? prev.files.filter((f) => f !== fileId) : [...prev.files, fileId],
                       }))
                     }
-                    style={{ justifyContent: 'flex-start' }}
+                    style={{ justifyContent: 'flex-start', opacity: filteredOut ? 0.4 : 1 }}
                   >
                     {label}
                   </button>
@@ -1382,6 +1441,7 @@ export default function HomePage() {
                     min={0}
                     step={0.25}
                     className="input"
+                    style={{ opacity: filteredOut ? 0.5 : 1 }}
                     value={contractValue}
                     onChange={(event) => {
                       const next = Number(event.target.value);
@@ -1397,6 +1457,7 @@ export default function HomePage() {
                     min={0}
                     step={100}
                     className="input"
+                    style={{ opacity: filteredOut ? 0.5 : 1 }}
                     value={marginValue}
                     onChange={(event) => {
                       const next = Number(event.target.value);
@@ -1432,7 +1493,13 @@ export default function HomePage() {
       </div>
 
       <div style={{ marginTop: 12 }}>
-        <SelectionControls selection={activeSelection} availableFiles={availableFiles} fileLabelMap={fileLabelMap} onChange={setActiveSelection} />
+        <SelectionControls
+          selection={activeSelection}
+          availableFiles={availableFiles}
+          fileLabelMap={fileLabelMap}
+          matchingFileCount={filteredFileIds.length}
+          onChange={setActiveSelection}
+        />
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
