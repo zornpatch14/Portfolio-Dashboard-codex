@@ -16,6 +16,7 @@ export default function SeriesChart({ title, series, color = '#4cc3ff' }: Props)
   useEffect(() => {
     if (!ref.current) return undefined;
     const chart = echarts.init(ref.current);
+    const points = series.portfolio ?? [];
     chart.setOption({
       backgroundColor: 'transparent',
       tooltip: { trigger: 'axis' },
@@ -24,7 +25,7 @@ export default function SeriesChart({ title, series, color = '#4cc3ff' }: Props)
       xAxis: {
         type: 'category',
         boundaryGap: false,
-        data: series.data.map((p) => p.timestamp),
+        data: points.map((p) => p.timestamp),
         axisLine: { lineStyle: { color: '#334b76' } },
         axisLabel: { color: '#a5b2c9' },
       },
@@ -40,7 +41,7 @@ export default function SeriesChart({ title, series, color = '#4cc3ff' }: Props)
           type: 'line',
           smooth: true,
           showSymbol: false,
-          data: series.data.map((p) => p.value),
+          data: points.map((p) => p.value),
           areaStyle: {
             opacity: 0.2,
             color,

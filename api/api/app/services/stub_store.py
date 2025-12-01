@@ -10,6 +10,7 @@ from ..schemas import (
     CTAResponse,
     CorrelationResponse,
     FileMetadata,
+    SeriesContributor,
     FileUploadResponse,
     JobEvent,
     JobResult,
@@ -94,13 +95,34 @@ class InMemoryStore:
         now = datetime.utcnow()
         raw_points = [SeriesPoint(timestamp=now - timedelta(minutes=i * 15), value=1000 + i * 10) for i in range(10)]
         data = raw_points[::2] if downsample else raw_points
+        points = list(reversed(data))
+        contributors = selection.files or list(self.files.keys())
+        per_file: list[SeriesContributor] = []
+        for idx, file_id in enumerate(contributors):
+            meta = self.files.get(file_id)
+            label = meta.filename if meta else file_id
+            offset = 1.0 + idx * 0.05
+            contributor_points = [
+                SeriesPoint(timestamp=pt.timestamp, value=pt.value * offset) for pt in points
+            ]
+            per_file.append(
+                SeriesContributor(
+                    contributor_id=file_id,
+                    label=label,
+                    points=contributor_points,
+                    symbol=None,
+                    interval=None,
+                    strategy=None,
+                )
+            )
         return SeriesResponse(
             series=series_name,
             selection=selection,
             downsampled=downsample,
             raw_count=len(raw_points),
-            downsampled_count=len(data),
-            data=list(reversed(data)),
+            downsampled_count=len(points),
+            portfolio=points,
+            per_file=per_file,
         )
 
     def metrics(self, selection: Selection) -> MetricsResponse:

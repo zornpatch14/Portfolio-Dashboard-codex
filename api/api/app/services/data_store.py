@@ -29,6 +29,7 @@ from api.app.schemas import (
     Selection,
     SelectionMeta,
     SeriesPoint,
+    SeriesContributor,
     SeriesResponse,
 )
 
@@ -329,32 +330,141 @@ class DataStore:
             view.daily_returns = filter_frame(view.daily_returns, "date", is_date=True)
         return view
 
+    def _selection_bounds(self, selection: Selection) -> tuple[datetime | None, datetime | None]:
+        start_ts = datetime.combine(selection.start_date, datetime.min.time()) if selection.start_date else None
+        end_ts = datetime.combine(selection.end_date, datetime.max.time()) if selection.end_date else None
+        return start_ts, end_ts
+
+    @staticmethod
+    def _apply_time_window(frame: pl.DataFrame, column: str, start_ts: datetime | None, end_ts: datetime | None) -> pl.DataFrame:
+        out = frame
+        if start_ts:
+            out = out.filter(pl.col(column) >= start_ts)
+        if end_ts:
+            out = out.filter(pl.col(column) <= end_ts)
+        return out
+
+    @staticmethod
+    def _resolve_override(overrides: dict[str, float], symbol: str | None) -> float | None:
+        if not symbol:
+            return None
+        symbol_upper = symbol.upper()
+        for key, value in overrides.items():
+            if key.upper() == symbol_upper:
+                return value
+        return None
+
+    def _downsample_frame_for_series(
+        self,
+        frame: pl.DataFrame,
+        timestamp_col: str,
+        value_col: str,
+        downsample: bool,
+    ) -> tuple[pl.DataFrame, int, int]:
+        if frame.is_empty():
+            return frame, 0, 0
+        if not downsample:
+            return frame, len(frame), len(frame)
+        result = downsample_timeseries(frame, timestamp_col, value_col, target_points=2000)
+        return result.downsampled, result.raw_count, result.downsampled_count
+
+    def _per_file_frame(
+        self,
+        series_name: str,
+        path: Path,
+        cmult: float | None,
+        margin_override: float | None,
+        direction: str | None,
+        start_ts: datetime | None,
+        end_ts: datetime | None,
+    ) -> tuple[pl.DataFrame, str] | None:
+        if series_name == "equity":
+            frame = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=margin_override, direction=direction)
+            frame = self._apply_time_window(frame, "timestamp", start_ts, end_ts)
+            return frame, "equity"
+
+        if series_name in {"equity_percent", "equity-percent"}:
+            equity = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=margin_override, direction=direction)
+            equity = self._apply_time_window(equity, "timestamp", start_ts, end_ts)
+            if equity.is_empty():
+                percent = pl.DataFrame({"timestamp": [], "percent_equity": []})
+            else:
+                first = float(equity["equity"][0])
+                if first == 0:
+                    percent = pl.DataFrame({"timestamp": [], "percent_equity": []})
+                else:
+                    percent_vals = ((equity["equity"] / first) - 1.0) * 100.0
+                    percent = pl.DataFrame({"timestamp": equity["timestamp"], "percent_equity": percent_vals})
+            return percent, "percent_equity"
+
+        if series_name in {"drawdown", "intraday_drawdown"}:
+            equity = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=margin_override, direction=direction)
+            equity = self._apply_time_window(equity, "timestamp", start_ts, end_ts)
+            dd_values = _drawdown_from_equity(equity)
+            frame = pl.DataFrame(dd_values, schema=["timestamp", "drawdown"]) if dd_values else pl.DataFrame({"timestamp": [], "drawdown": []})
+            return frame, "drawdown"
+
+        if series_name == "netpos":
+            frame = self.cache.net_position(path, contract_multiplier=cmult, margin_override=margin_override, direction=direction)
+            frame = self._apply_time_window(frame, "timestamp", start_ts, end_ts)
+            return frame, "net_position"
+
+        if series_name == "margin":
+            frame = self.cache.margin_usage(path, contract_multiplier=cmult, margin_override=margin_override, direction=direction)
+            frame = self._apply_time_window(frame, "timestamp", start_ts, end_ts)
+            return frame.select(pl.col("timestamp"), pl.col("margin_used")), "margin_used"
+
+        return None
+
+    def _build_per_file_lines(self, series_name: str, selection: Selection, downsample: bool) -> list[SeriesContributor]:
+        metas = self._metas_for_selection(selection)
+        start_ts, end_ts = self._selection_bounds(selection)
+        lines: list[SeriesContributor] = []
+        for meta in metas:
+            path = Path(meta.trades_path)
+            cmult = self._resolve_override(selection.contract_multipliers, meta.symbol)
+            margin_override = self._resolve_override(selection.margin_overrides, meta.symbol)
+            frame_info = self._per_file_frame(
+                series_name,
+                path,
+                cmult,
+                margin_override,
+                selection.direction,
+                start_ts,
+                end_ts,
+            )
+            if frame_info is None:
+                continue
+            frame, value_col = frame_info
+            downsampled, _, _ = self._downsample_frame_for_series(frame, "timestamp", value_col, downsample)
+            points = self._to_points(downsampled.iter_rows(named=True), "timestamp", value_col)
+            label = meta.original_filename or meta.filename or meta.file_id
+            interval = str(meta.interval) if meta.interval is not None else None
+            lines.append(
+                SeriesContributor(
+                    contributor_id=meta.file_id,
+                    label=label,
+                    symbol=(meta.symbol or "").upper() or None,
+                    interval=interval,
+                    strategy=meta.strategy or None,
+                    points=points,
+                )
+            )
+        return lines
+
     # ---------------- series & metrics ----------------
     def series(self, series_name: str, selection: Selection, downsample: bool) -> SeriesResponse:
         view = self._view_for_selection(selection)
 
-        def build_timeseries(frame: pl.DataFrame, value_col: str, label: str) -> SeriesResponse:
-            raw = len(frame)
-            sampled = raw
-            if downsample:
-                result = downsample_timeseries(frame, "timestamp", value_col, target_points=2000)
-                frame = result.downsampled
-                raw = result.raw_count
-                sampled = result.downsampled_count
-            data = self._to_points(frame.iter_rows(named=True), "timestamp", value_col)
-            return SeriesResponse(
-                series=label,
-                selection=selection,
-                downsampled=downsample,
-                raw_count=raw,
-                downsampled_count=sampled,
-                data=data,
-            )
-
+        frame: pl.DataFrame | None = None
+        value_col = "value"
+        label = series_name
         if series_name == "equity":
-            return build_timeseries(view.equity, "equity", "equity")
+            frame = view.equity
+            value_col = "equity"
+            label = "equity"
 
-        if series_name in {"equity_percent", "equity-percent"}:
+        elif series_name in {"equity_percent", "equity-percent"}:
             if view.equity.is_empty():
                 percent_frame = pl.DataFrame({"timestamp": [], "percent_equity": []})
             else:
@@ -364,22 +474,43 @@ class DataStore:
                 else:
                     percent_vals = ((view.equity["equity"] / first) - 1.0) * 100.0
                     percent_frame = pl.DataFrame({"timestamp": view.equity["timestamp"], "percent_equity": percent_vals})
-            return build_timeseries(percent_frame, "percent_equity", "equity_percent")
+            frame = percent_frame
+            value_col = "percent_equity"
+            label = "equity_percent"
 
-        if series_name in {"drawdown", "intraday_drawdown"}:
+        elif series_name in {"drawdown", "intraday_drawdown"}:
             dd_values = _drawdown_from_equity(view.equity)
             frame = pl.DataFrame(dd_values, schema=["timestamp", "drawdown"]) if dd_values else pl.DataFrame(
                 {"timestamp": [], "drawdown": []}
             )
-            return build_timeseries(frame, "drawdown", "drawdown")
+            value_col = "drawdown"
+            label = "drawdown"
 
-        if series_name == "netpos":
-            return build_timeseries(view.net_position, "net_position", "netpos")
+        elif series_name == "netpos":
+            frame = view.net_position
+            value_col = "net_position"
+            label = "netpos"
 
-        if series_name == "margin":
-            return build_timeseries(view.margin, "margin_used", "margin")
+        elif series_name == "margin":
+            frame = view.margin
+            value_col = "margin_used"
+            label = "margin"
 
-        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Series not implemented")
+        else:
+            raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Series not implemented")
+
+        downsampled_frame, raw, sampled = self._downsample_frame_for_series(frame, "timestamp", value_col, downsample)
+        data = self._to_points(downsampled_frame.iter_rows(named=True), "timestamp", value_col)
+        per_file_lines = self._build_per_file_lines(series_name, selection, downsample)
+        return SeriesResponse(
+            series=label,
+            selection=selection,
+            downsampled=downsample,
+            raw_count=raw,
+            downsampled_count=sampled,
+            portfolio=data,
+            per_file=per_file_lines,
+        )
 
     def histogram(self, selection: Selection, bins: int = 20) -> HistogramResponse:
         view = self._view_for_selection(selection)

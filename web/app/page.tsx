@@ -162,7 +162,7 @@ export default function HomePage() {
   });
 
   useEffect(() => {
-    const points = equityQuery.data?.data ?? [];
+    const points = equityQuery.data?.portfolio ?? [];
     const timestamps = points.map((p) => p.timestamp).filter(Boolean) ?? [];
     if (!timestamps.length) return;
     const sorted = [...timestamps].sort();
@@ -191,13 +191,21 @@ export default function HomePage() {
   }, [fileLabelMap]);
 
   const equityLines = useMemo(() => {
-    const portfolioPoints = (equityQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-    return { perFile: [], portfolio: portfolioPoints };
+    const portfolioPoints = (equityQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    const perFile = (equityQuery.data?.per_file ?? []).map((line) => ({
+      name: line.label || line.contributor_id,
+      points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
+    }));
+    return { perFile, portfolio: portfolioPoints };
   }, [equityQuery.data]);
 
   const equityPercentLines = useMemo(() => {
-    const portfolioPoints = (equityPctQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-    return { perFile: [], portfolio: portfolioPoints };
+    const portfolioPoints = (equityPctQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    const perFile = (equityPctQuery.data?.per_file ?? []).map((line) => ({
+      name: line.label || line.contributor_id,
+      points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
+    }));
+    return { perFile, portfolio: portfolioPoints };
   }, [equityPctQuery.data]);
 
   useEffect(() => {
@@ -218,8 +226,12 @@ export default function HomePage() {
   }, [equityLines.perFile, equityPercentLines.perFile]);
 
   const drawdownLines = useMemo(() => {
-    const portfolioPoints = (drawdownQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-    return { perFile: [], portfolio: portfolioPoints };
+    const portfolioPoints = (drawdownQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    const perFile = (drawdownQuery.data?.per_file ?? []).map((line) => ({
+      name: line.label || line.contributor_id,
+      points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
+    }));
+    return { perFile, portfolio: portfolioPoints };
   }, [drawdownQuery.data]);
 
   const drawdownPercentLines = useMemo(() => {
@@ -250,13 +262,21 @@ export default function HomePage() {
   }, [drawdownLines.perFile]);
 
   const marginLines = useMemo(() => {
-    const portfolioPoints = (marginQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-    return { perFile: [], portfolio: portfolioPoints };
+    const portfolioPoints = (marginQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    const perFile = (marginQuery.data?.per_file ?? []).map((line) => ({
+      name: line.label || line.contributor_id,
+      points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
+    }));
+    return { perFile, portfolio: portfolioPoints };
   }, [marginQuery.data]);
 
   const netposLines = useMemo(() => {
-    const portfolioPoints = (netposQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-    return { perFile: [], portfolio: portfolioPoints };
+    const portfolioPoints = (netposQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    const perFile = (netposQuery.data?.per_file ?? []).map((line) => ({
+      name: line.label || line.contributor_id,
+      points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
+    }));
+    return { perFile, portfolio: portfolioPoints };
   }, [netposQuery.data]);
 
   const purchasingPowerLines = useMemo(() => {
@@ -434,7 +454,7 @@ export default function HomePage() {
             <div className="placeholder-text">No equity data.</div>
           )}
           <div className="text-muted small">
-            Points: {equityQuery.data?.downsampled_count ?? equityQuery.data?.data.length ?? 0}
+            Points: {equityQuery.data?.downsampled_count ?? equityQuery.data?.portfolio.length ?? 0}
           </div>
         </div>
         <div className="card">
@@ -444,7 +464,7 @@ export default function HomePage() {
             <div className="placeholder-text">No percent equity data.</div>
           )}
           <div className="text-muted small">
-            Points: {equityPctQuery.data?.downsampled_count ?? equityPctQuery.data?.data.length ?? 0}
+            Points: {equityPctQuery.data?.downsampled_count ?? equityPctQuery.data?.portfolio.length ?? 0}
           </div>
         </div>
         <div className="card">
@@ -454,7 +474,7 @@ export default function HomePage() {
             <div className="placeholder-text">No drawdown data.</div>
           )}
           <div className="text-muted small">
-            Points: {drawdownQuery.data?.downsampled_count ?? drawdownQuery.data?.data.length ?? 0}
+            Points: {drawdownQuery.data?.downsampled_count ?? drawdownQuery.data?.portfolio.length ?? 0}
           </div>
         </div>
         <div className="card">
@@ -464,7 +484,7 @@ export default function HomePage() {
             <div className="placeholder-text">No intraday drawdown data.</div>
           )}
           <div className="text-muted small">
-            Points: {intradayDdQuery.data?.downsampled_count ?? intradayDdQuery.data?.data.length ?? 0}
+            Points: {intradayDdQuery.data?.downsampled_count ?? intradayDdQuery.data?.portfolio.length ?? 0}
           </div>
         </div>
         <div className="card">
@@ -474,7 +494,7 @@ export default function HomePage() {
             <div className="placeholder-text">No net position data.</div>
           )}
           <div className="text-muted small">
-            Points: {netposQuery.data?.downsampled_count ?? netposQuery.data?.data.length ?? 0}
+            Points: {netposQuery.data?.downsampled_count ?? netposQuery.data?.portfolio.length ?? 0}
           </div>
         </div>
         <div className="card">
@@ -484,7 +504,7 @@ export default function HomePage() {
             <div className="placeholder-text">No margin data.</div>
           )}
           <div className="text-muted small">
-            Points: {marginQuery.data?.downsampled_count ?? marginQuery.data?.data.length ?? 0}
+            Points: {marginQuery.data?.downsampled_count ?? marginQuery.data?.portfolio.length ?? 0}
           </div>
         </div>
         <div className="card">
@@ -1037,7 +1057,7 @@ export default function HomePage() {
           <>
             <SeriesChart title="Intraday Drawdown" series={intradayDdQuery.data} color="#f4c95d" />
             <div className="text-muted small">
-              Points: {intradayDdQuery.data?.downsampled_count ?? intradayDdQuery.data?.data.length ?? 0}
+              Points: {intradayDdQuery.data?.downsampled_count ?? intradayDdQuery.data?.portfolio.length ?? 0}
             </div>
           </>
         ) : (

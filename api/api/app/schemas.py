@@ -53,13 +53,23 @@ class SeriesPoint(BaseModel):
     value: float
 
 
+class SeriesContributor(BaseModel):
+    contributor_id: str
+    label: str
+    symbol: Optional[str] = None
+    interval: Optional[str] = None
+    strategy: Optional[str] = None
+    points: List[SeriesPoint] = Field(default_factory=list)
+
+
 class SeriesResponse(BaseModel):
     series: str
     selection: Selection
     downsampled: bool = True
     raw_count: int = 0
     downsampled_count: int = 0
-    data: List[SeriesPoint]
+    portfolio: List[SeriesPoint] = Field(default_factory=list)
+    per_file: List[SeriesContributor] = Field(default_factory=list)
 
 
 class HistogramBucket(BaseModel):

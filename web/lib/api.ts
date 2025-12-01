@@ -5,13 +5,23 @@ export type SeriesPoint = {
   value: number;
 };
 
+export type SeriesContributor = {
+  contributor_id: string;
+  label: string;
+  symbol?: string | null;
+  interval?: string | null;
+  strategy?: string | null;
+  points: SeriesPoint[];
+};
+
 export type SeriesResponse = {
   series: string;
   selection?: Selection;
   downsampled?: boolean;
   raw_count?: number;
   downsampled_count?: number;
-  data: SeriesPoint[];
+  portfolio: SeriesPoint[];
+  per_file: SeriesContributor[];
 };
 
 export type HistogramBucket = {
@@ -201,11 +211,26 @@ export function mockSeries(selection: Selection, kind: SeriesKind): SeriesRespon
     netpos: 'Net Position',
     margin: 'Margin Usage',
   };
+  const contributorIds = selection.fileIds && selection.fileIds.length ? selection.fileIds : selection.files;
+  const perFile = contributorIds.map((id, idx) => {
+    const label = selection.fileLabels?.[id] || id;
+    const modifier = 1 + idx * 0.05;
+    return {
+      contributor_id: id,
+      label,
+      points: points.map((pt) => ({ ...pt, value: pt.value * modifier })),
+      symbol: undefined,
+      interval: undefined,
+      strategy: undefined,
+    };
+  });
   return {
-    label: `${labelByKind[kind]} (${selection.name})`,
-    points,
-    rawCount: points.length,
-    downsampledCount: points.length,
+    series: `${labelByKind[kind]} (${selection.name})`,
+    portfolio: points,
+    per_file: perFile,
+    downsampled: false,
+    raw_count: points.length,
+    downsampled_count: points.length,
   };
 }
 
