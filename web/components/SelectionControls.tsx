@@ -8,9 +8,10 @@ type Props = {
   availableFiles: string[];
   fileLabelMap: Record<string, string>;
   onChange: (selection: Selection) => void;
+  matchingFileCount: number;
 };
 
-export function SelectionControls({ selection, availableFiles, fileLabelMap, onChange }: Props) {
+export function SelectionControls({ selection, availableFiles, fileLabelMap, onChange, matchingFileCount }: Props) {
   const toggleFile = (file: string) => {
     const exists = selection.files.includes(file);
     const files = exists ? selection.files.filter((f) => f !== file) : [...selection.files, file];
@@ -42,7 +43,10 @@ export function SelectionControls({ selection, availableFiles, fileLabelMap, onC
     <div className="panel">
       <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
         <h2 className="section-title">Selection filters</h2>
-        <span className="badge">Interactive</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="badge">Interactive</span>
+          <span className="text-muted small">Matching files: {matchingFileCount}</span>
+        </div>
       </div>
       <p className="text-muted small" style={{ marginTop: 0, marginBottom: 16 }}>
         Adjust your selection to mirror the legacy Dash controls. Changes apply instantly and drive live API calls when

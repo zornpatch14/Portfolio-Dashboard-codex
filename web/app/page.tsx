@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import MetricsGrid from '../components/MetricsGrid';
 import SeriesChart from '../components/SeriesChart';
 import { HistogramChart } from '../components/HistogramChart';
@@ -41,6 +41,13 @@ const tabs = [
   { key: 'metrics', label: 'Metrics' },
   { key: 'inverse-volatility', label: 'Inverse Volatility' },
 ] as const;
+const NO_DATA_MESSAGE = 'No data matches your selection.';
+const GENERIC_ERROR_MESSAGE = 'Failed to load data.';
+
+const isNoDataError = (error: unknown): boolean => Boolean(error && (error as any).code === 'NO_DATA');
+
+const getQueryErrorMessage = (error: unknown, fallback?: string) =>
+  isNoDataError(error) ? NO_DATA_MESSAGE : fallback || GENERIC_ERROR_MESSAGE;
 
 type TabKey = (typeof tabs)[number]['key'];
 
@@ -98,10 +105,10 @@ export default function HomePage() {
         const meta = await getSelectionMeta();
         setSelectionMeta(meta);
         setFilesMeta(meta.files);
-        if (!activeSelection.fileIds || !activeSelection.fileIds.length) {
+        if (!activeSelection.files || !activeSelection.files.length) {
           const ids = meta.files.map((f) => f.file_id);
           const labels = Object.fromEntries(meta.files.map((f) => [f.file_id, f.filename]));
-          setActiveSelection((prev) => ({ ...prev, fileIds: ids, fileLabels: labels, files: ids }));
+          setActiveSelection((prev) => ({ ...prev, fileLabels: labels, files: ids }));
         }
       } catch (error: any) {
         console.warn('Failed to load selection metadata', error);
@@ -120,49 +127,123 @@ export default function HomePage() {
     [filesMeta],
   );
 
+  const deriveFileMeta = useMemo(() => {
+    return (fileId: string) => {
+      const label = fileLabelMap[fileId] || fileId;
+      const base = label.split('/').pop() || label;
+      const parts = base.replace(/\.[^.]+$/, '').split('_');
+      return {
+        symbol: parts[1] || '',
+        interval: parts[2] || '',
+        strategy: parts.slice(3).join('_') || '',
+      };
+    };
+  }, [fileLabelMap]);
+
+  const fileMetaMap = useMemo(() => {
+    const map = new Map<string, (typeof filesMeta)[number]>();
+    filesMeta.forEach((file) => map.set(file.file_id, file));
+    return map;
+  }, [filesMeta]);
+
   // Keep selection files aligned with files reported by the API.
   useEffect(() => {
     if (!filesMeta.length) return;
     const ids = filesMeta.map((f) => f.file_id);
     setActiveSelection((prev) => {
-      const current = prev.fileIds && prev.fileIds.length ? prev.fileIds : prev.files;
+      const current = prev.files || [];
       const filtered = current.filter((id) => ids.includes(id));
       const nextFiles = filtered.length ? filtered : ids;
       const labels = Object.fromEntries(filesMeta.map((f) => [f.file_id, f.filename]));
-      return { ...prev, fileIds: nextFiles, files: nextFiles, fileLabels: labels };
+      return { ...prev, files: nextFiles, fileLabels: labels };
     });
   }, [filesMeta]);
 
-  const seriesKinds: SeriesKind[] = ['equity', 'equityPercent', 'drawdown', 'intradayDrawdown', 'netpos', 'margin'];
+  const matchesFilters = useCallback(
+    (fileId: string) => {
+      const normalizedSymbols = activeSelection.symbols.map((symbol) => symbol.toUpperCase());
+      const normalizedIntervals = activeSelection.intervals.map((interval) => String(interval));
+      const normalizedStrategies = activeSelection.strategies.map((strategy) => strategy.toUpperCase());
+      const meta = fileMetaMap.get(fileId);
+      const fallback = deriveFileMeta(fileId);
+      const fileSymbols =
+        meta && meta.symbols.length
+          ? meta.symbols
+          : fallback.symbol
+            ? [fallback.symbol]
+            : [];
+      const fileIntervals =
+        meta && meta.intervals.length
+          ? meta.intervals
+          : fallback.interval
+            ? [fallback.interval]
+            : [];
+      const fileStrategies =
+        meta && meta.strategies.length
+          ? meta.strategies
+          : fallback.strategy
+            ? [fallback.strategy]
+            : [];
 
-  const [
-    equityQuery,
-    equityPctQuery,
-    drawdownQuery,
-    intradayDdQuery,
-    netposQuery,
-    marginQuery,
-    histogramQuery,
-    metricsQuery,
-  ] = useQueries({
-    queries: [
-      ...seriesKinds.map((kind) => ({
-        queryKey: [kind, activeSelection.name, (activeSelection.fileIds || activeSelection.files).join(',')],
-        queryFn: () => fetchSeries(activeSelection, kind, includeDownsample),
-      })),
-      {
-        queryKey: ['histogram', activeSelection.name, (activeSelection.fileIds || activeSelection.files).join(',')],
-        queryFn: () => fetchHistogram(activeSelection),
-      },
-      {
-        queryKey: ['metrics', activeSelection.name, (activeSelection.fileIds || activeSelection.files).join(',')],
-        queryFn: () => fetchMetrics(activeSelection),
-      },
-    ],
+      const symbolMatch =
+        !normalizedSymbols.length ||
+        (fileSymbols.length && fileSymbols.some((symbol) => normalizedSymbols.includes(symbol.toUpperCase())));
+      const intervalMatch =
+        !normalizedIntervals.length ||
+        (fileIntervals.length && fileIntervals.some((interval) => normalizedIntervals.includes(String(interval))));
+      const strategyMatch =
+        !normalizedStrategies.length ||
+        (fileStrategies.length && fileStrategies.some((strategy) => normalizedStrategies.includes(strategy.toUpperCase())));
+
+      return symbolMatch && intervalMatch && strategyMatch;
+    },
+    [activeSelection.symbols, activeSelection.intervals, activeSelection.strategies, deriveFileMeta, fileMetaMap],
+  );
+
+  const filteredFileIds = useMemo(() => {
+    if (!activeSelection.files || !activeSelection.files.length) return [];
+    return activeSelection.files.filter((fileId) => matchesFilters(fileId));
+  }, [activeSelection.files, matchesFilters]);
+
+  const filteredFileSet = useMemo(() => new Set(filteredFileIds), [filteredFileIds]);
+
+  const selectionForFetch = useMemo(() => ({ ...activeSelection, files: filteredFileIds }), [activeSelection, filteredFileIds]);
+
+  const equityQuery = useQuery({
+    queryKey: ['equity', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryFn: () => fetchSeries(selectionForFetch, 'equity', includeDownsample),
+  });
+  const equityPctQuery = useQuery({
+    queryKey: ['equityPercent', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryFn: () => fetchSeries(selectionForFetch, 'equityPercent', includeDownsample),
+  });
+  const drawdownQuery = useQuery({
+    queryKey: ['drawdown', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryFn: () => fetchSeries(selectionForFetch, 'drawdown', includeDownsample),
+  });
+  const intradayDdQuery = useQuery({
+    queryKey: ['intradayDrawdown', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryFn: () => fetchSeries(selectionForFetch, 'intradayDrawdown', includeDownsample),
+  });
+  const netposQuery = useQuery({
+    queryKey: ['netpos', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryFn: () => fetchSeries(selectionForFetch, 'netpos', includeDownsample),
+  });
+  const marginQuery = useQuery({
+    queryKey: ['margin', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryFn: () => fetchSeries(selectionForFetch, 'margin', includeDownsample),
+  });
+  const histogramQuery = useQuery({
+    queryKey: ['histogram', selectionForFetch.name, filteredFileIds.join(',')],
+    queryFn: () => fetchHistogram(selectionForFetch),
+  });
+  const metricsQuery = useQuery({
+    queryKey: ['metrics', selectionForFetch.name, filteredFileIds.join(',')],
+    queryFn: () => fetchMetrics(selectionForFetch),
   });
 
   useEffect(() => {
-    const points = equityQuery.data?.data ?? [];
+    const points = equityQuery.data?.portfolio ?? [];
     const timestamps = points.map((p) => p.timestamp).filter(Boolean) ?? [];
     if (!timestamps.length) return;
     const sorted = [...timestamps].sort();
@@ -177,27 +258,22 @@ export default function HomePage() {
     });
   }, [equityQuery.data, activeSelection.name]);
 
-  const deriveFileMeta = useMemo(() => {
-    return (fileId: string) => {
-      const label = fileLabelMap[fileId] || fileId;
-      const base = label.split('/').pop() || label;
-      const parts = base.replace(/\.[^.]+$/, '').split('_');
-      return {
-        symbol: parts[1] || '',
-        interval: parts[2] || '',
-        strategy: parts.slice(3).join('_') || '',
-      };
-    };
-  }, [fileLabelMap]);
-
   const equityLines = useMemo(() => {
-    const portfolioPoints = (equityQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-    return { perFile: [], portfolio: portfolioPoints };
+    const portfolioPoints = (equityQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    const perFile = (equityQuery.data?.perFile ?? []).map((line) => ({
+      name: line.label || line.contributor_id,
+      points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
+    }));
+    return { perFile, portfolio: portfolioPoints };
   }, [equityQuery.data]);
 
   const equityPercentLines = useMemo(() => {
-    const portfolioPoints = (equityPctQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-    return { perFile: [], portfolio: portfolioPoints };
+    const portfolioPoints = (equityPctQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    const perFile = (equityPctQuery.data?.perFile ?? []).map((line) => ({
+      name: line.label || line.contributor_id,
+      points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
+    }));
+    return { perFile, portfolio: portfolioPoints };
   }, [equityPctQuery.data]);
 
   useEffect(() => {
@@ -218,8 +294,12 @@ export default function HomePage() {
   }, [equityLines.perFile, equityPercentLines.perFile]);
 
   const drawdownLines = useMemo(() => {
-    const portfolioPoints = (drawdownQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-    return { perFile: [], portfolio: portfolioPoints };
+    const portfolioPoints = (drawdownQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    const perFile = (drawdownQuery.data?.perFile ?? []).map((line) => ({
+      name: line.label || line.contributor_id,
+      points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
+    }));
+    return { perFile, portfolio: portfolioPoints };
   }, [drawdownQuery.data]);
 
   const drawdownPercentLines = useMemo(() => {
@@ -250,13 +330,21 @@ export default function HomePage() {
   }, [drawdownLines.perFile]);
 
   const marginLines = useMemo(() => {
-    const portfolioPoints = (marginQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-    return { perFile: [], portfolio: portfolioPoints };
+    const portfolioPoints = (marginQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    const perFile = (marginQuery.data?.perFile ?? []).map((line) => ({
+      name: line.label || line.contributor_id,
+      points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
+    }));
+    return { perFile, portfolio: portfolioPoints };
   }, [marginQuery.data]);
 
   const netposLines = useMemo(() => {
-    const portfolioPoints = (netposQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-    return { perFile: [], portfolio: portfolioPoints };
+    const portfolioPoints = (netposQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    const perFile = (netposQuery.data?.perFile ?? []).map((line) => ({
+      name: line.label || line.contributor_id,
+      points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
+    }));
+    return { perFile, portfolio: portfolioPoints };
   }, [netposQuery.data]);
 
   const purchasingPowerLines = useMemo(() => {
@@ -340,21 +428,21 @@ export default function HomePage() {
   }, [histogramData]);
 
   const correlationQuery = useQuery({
-    queryKey: ['correlations', activeSelection.name, activeSelection.files.join(','), corrMode],
-    queryFn: () => fetchCorrelations(activeSelection, corrMode),
-    initialData: mockCorrelations(activeSelection, corrMode),
+    queryKey: ['correlations', selectionForFetch.name, filteredFileIds.join(','), corrMode],
+    queryFn: () => fetchCorrelations(selectionForFetch, corrMode),
+    initialData: mockCorrelations(selectionForFetch, corrMode),
   });
 
   const optimizerQuery = useQuery({
-    queryKey: ['optimizer', activeSelection.name, activeSelection.files.join(',')],
-    queryFn: () => fetchOptimizer(activeSelection),
-    initialData: mockOptimizer(activeSelection),
+    queryKey: ['optimizer', selectionForFetch.name, filteredFileIds.join(',')],
+    queryFn: () => fetchOptimizer(selectionForFetch),
+    initialData: mockOptimizer(selectionForFetch),
   });
 
   const ctaQuery = useQuery({
-    queryKey: ['cta', activeSelection.name, activeSelection.files.join(',')],
-    queryFn: () => fetchCta(activeSelection),
-    initialData: mockCta(activeSelection),
+    queryKey: ['cta', selectionForFetch.name, filteredFileIds.join(',')],
+    queryFn: () => fetchCta(selectionForFetch),
+    initialData: mockCta(selectionForFetch),
   });
 
   const metricsSummary = useMemo(() => {
@@ -418,7 +506,7 @@ export default function HomePage() {
         </div>
         <div className="metric-card">
           <span className="text-muted small">Files</span>
-          <strong>{activeSelection.files.length}</strong>
+          <strong>{filteredFileIds.length}</strong>
         </div>
         <div className="metric-card">
           <span className="text-muted small">Account Equity</span>
@@ -428,67 +516,81 @@ export default function HomePage() {
 
       <div className="charts-grid" style={{ marginTop: 18 }}>
         <div className="card">
-          {equityQuery.data ? (
+          {equityQuery.isError ? (
+            <div className="placeholder-text">{getQueryErrorMessage(equityQuery.error)}</div>
+          ) : equityQuery.data ? (
             <SeriesChart title="Equity Curve" series={equityQuery.data} color="#4cc3ff" />
           ) : (
             <div className="placeholder-text">No equity data.</div>
           )}
           <div className="text-muted small">
-            Points: {equityQuery.data?.downsampled_count ?? equityQuery.data?.data.length ?? 0}
+            Points: {equityQuery.data?.downsampled_count ?? equityQuery.data?.portfolio.length ?? 0}
           </div>
         </div>
         <div className="card">
-          {equityPctQuery.data ? (
+          {equityPctQuery.isError ? (
+            <div className="placeholder-text">{getQueryErrorMessage(equityPctQuery.error)}</div>
+          ) : equityPctQuery.data ? (
             <SeriesChart title="Percent Equity" series={equityPctQuery.data} color="#8fe3c7" />
           ) : (
             <div className="placeholder-text">No percent equity data.</div>
           )}
           <div className="text-muted small">
-            Points: {equityPctQuery.data?.downsampled_count ?? equityPctQuery.data?.data.length ?? 0}
+            Points: {equityPctQuery.data?.downsampled_count ?? equityPctQuery.data?.portfolio.length ?? 0}
           </div>
         </div>
         <div className="card">
-          {drawdownQuery.data ? (
+          {drawdownQuery.isError ? (
+            <div className="placeholder-text">{getQueryErrorMessage(drawdownQuery.error)}</div>
+          ) : drawdownQuery.data ? (
             <SeriesChart title="Drawdown" series={drawdownQuery.data} color="#ff8f6b" />
           ) : (
             <div className="placeholder-text">No drawdown data.</div>
           )}
           <div className="text-muted small">
-            Points: {drawdownQuery.data?.downsampled_count ?? drawdownQuery.data?.data.length ?? 0}
+            Points: {drawdownQuery.data?.downsampled_count ?? drawdownQuery.data?.portfolio.length ?? 0}
           </div>
         </div>
         <div className="card">
-          {intradayDdQuery.data ? (
+          {intradayDdQuery.isError ? (
+            <div className="placeholder-text">{getQueryErrorMessage(intradayDdQuery.error)}</div>
+          ) : intradayDdQuery.data ? (
             <SeriesChart title="Intraday Drawdown" series={intradayDdQuery.data} color="#f4c95d" />
           ) : (
             <div className="placeholder-text">No intraday drawdown data.</div>
           )}
           <div className="text-muted small">
-            Points: {intradayDdQuery.data?.downsampled_count ?? intradayDdQuery.data?.data.length ?? 0}
+            Points: {intradayDdQuery.data?.downsampled_count ?? intradayDdQuery.data?.portfolio.length ?? 0}
           </div>
         </div>
         <div className="card">
-          {netposQuery.data ? (
+          {netposQuery.isError ? (
+            <div className="placeholder-text">{getQueryErrorMessage(netposQuery.error)}</div>
+          ) : netposQuery.data ? (
             <SeriesChart title="Net Position" series={netposQuery.data} color="#9f8bff" />
           ) : (
             <div className="placeholder-text">No net position data.</div>
           )}
           <div className="text-muted small">
-            Points: {netposQuery.data?.downsampled_count ?? netposQuery.data?.data.length ?? 0}
+            Points: {netposQuery.data?.downsampled_count ?? netposQuery.data?.portfolio.length ?? 0}
           </div>
         </div>
         <div className="card">
-          {marginQuery.data ? (
+          {marginQuery.isError ? (
+            <div className="placeholder-text">{getQueryErrorMessage(marginQuery.error)}</div>
+          ) : marginQuery.data ? (
             <SeriesChart title="Margin Usage" series={marginQuery.data} color="#54ffd0" />
           ) : (
             <div className="placeholder-text">No margin data.</div>
           )}
           <div className="text-muted small">
-            Points: {marginQuery.data?.downsampled_count ?? marginQuery.data?.data.length ?? 0}
+            Points: {marginQuery.data?.downsampled_count ?? marginQuery.data?.portfolio.length ?? 0}
           </div>
         </div>
         <div className="card">
-          {histogramQuery.data ? (
+          {histogramQuery.isError ? (
+            <div className="placeholder-text">{getQueryErrorMessage(histogramQuery.error)}</div>
+          ) : histogramQuery.data ? (
             <HistogramChart histogram={histogramQuery.data} />
           ) : (
             <div className="placeholder-text">No histogram data.</div>
@@ -501,7 +603,9 @@ export default function HomePage() {
 
       <div style={{ marginTop: 18 }}>
         <h3 className="section-title">Per-file metrics</h3>
-        {metricsQuery.data && metricsQuery.data.length ? (
+        {metricsQuery.isError ? (
+          <div className="placeholder-text">{getQueryErrorMessage(metricsQuery.error)}</div>
+        ) : metricsQuery.data && metricsQuery.data.length ? (
           <MetricsGrid rows={metricsQuery.data} />
         ) : (
           <div className="placeholder-text">No metrics returned yet.</div>
@@ -1033,11 +1137,13 @@ export default function HomePage() {
         {activeBadge}
       </div>
       <div className="card" style={{ marginTop: 12 }}>
-        {intradayDdQuery.data ? (
+        {intradayDdQuery.isError ? (
+          <div className="placeholder-text">{getQueryErrorMessage(intradayDdQuery.error)}</div>
+        ) : intradayDdQuery.data ? (
           <>
             <SeriesChart title="Intraday Drawdown" series={intradayDdQuery.data} color="#f4c95d" />
             <div className="text-muted small">
-              Points: {intradayDdQuery.data?.downsampled_count ?? intradayDdQuery.data?.data.length ?? 0}
+              Points: {intradayDdQuery.data?.downsampled_count ?? intradayDdQuery.data?.portfolio.length ?? 0}
             </div>
           </>
         ) : (
@@ -1140,7 +1246,7 @@ export default function HomePage() {
 
       {(() => {
         const activeHists = histogramData.filter((h) => plotHistogramEnabled[h.name] !== false);
-        const bucketOrder = activeHists[0]?.buckets.map((b) => b.bucket) ?? [];
+        const bucketOrder = (activeHists[0]?.buckets ?? []).map((bucketItem) => bucketItem.bucket);
         const bucketMap = new Map(bucketOrder.map((b) => [b, 0]));
         activeHists.forEach((hist) => {
           hist.buckets.forEach((bucket) => {
@@ -1193,7 +1299,9 @@ export default function HomePage() {
         {activeBadge}
       </div>
       <div style={{ marginTop: 12 }}>
-        {metricsQuery.data && metricsQuery.data.length ? (
+        {metricsQuery.isError ? (
+          <div className="placeholder-text">{getQueryErrorMessage(metricsQuery.error)}</div>
+        ) : metricsQuery.data && metricsQuery.data.length ? (
           <MetricsGrid rows={metricsQuery.data} />
         ) : (
           <div className="placeholder-text">No metrics returned yet.</div>
@@ -1276,7 +1384,6 @@ export default function HomePage() {
                 const labels = Object.fromEntries(meta.files.map((f) => [f.file_id, f.filename]));
                 setActiveSelection((prev) => ({
                   ...prev,
-                  fileIds: ids,
                   fileLabels: labels,
                   files: ids,
                 }));
@@ -1333,6 +1440,8 @@ export default function HomePage() {
               const active = activeSelection.files.includes(fileId);
               const contractValue = activeSelection.contracts[fileId] ?? 1;
               const marginValue = activeSelection.margins[fileId] ?? '';
+              const filteredIn = filteredFileSet.has(fileId);
+              const filteredOut = active && !filteredIn;
               return (
                 <div
                   key={fileId}
@@ -1348,13 +1457,14 @@ export default function HomePage() {
                   <button
                     type="button"
                     className={`chip ${active ? 'chip-active' : ''}`}
+                    title={filteredOut ? 'Excluded by current filters' : undefined}
                     onClick={() =>
                       setActiveSelection((prev) => ({
                         ...prev,
                         files: active ? prev.files.filter((f) => f !== fileId) : [...prev.files, fileId],
                       }))
                     }
-                    style={{ justifyContent: 'flex-start' }}
+                    style={{ justifyContent: 'flex-start', opacity: filteredOut ? 0.4 : 1 }}
                   >
                     {label}
                   </button>
@@ -1363,6 +1473,7 @@ export default function HomePage() {
                     min={0}
                     step={0.25}
                     className="input"
+                    style={{ opacity: filteredOut ? 0.5 : 1 }}
                     value={contractValue}
                     onChange={(event) => {
                       const next = Number(event.target.value);
@@ -1378,6 +1489,7 @@ export default function HomePage() {
                     min={0}
                     step={100}
                     className="input"
+                    style={{ opacity: filteredOut ? 0.5 : 1 }}
                     value={marginValue}
                     onChange={(event) => {
                       const next = Number(event.target.value);
@@ -1413,7 +1525,13 @@ export default function HomePage() {
       </div>
 
       <div style={{ marginTop: 12 }}>
-        <SelectionControls selection={activeSelection} availableFiles={availableFiles} fileLabelMap={fileLabelMap} onChange={setActiveSelection} />
+        <SelectionControls
+          selection={activeSelection}
+          availableFiles={availableFiles}
+          fileLabelMap={fileLabelMap}
+          matchingFileCount={filteredFileIds.length}
+          onChange={setActiveSelection}
+        />
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>

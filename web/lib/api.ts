@@ -5,13 +5,28 @@ export type SeriesPoint = {
   value: number;
 };
 
+export type SeriesContributor = {
+  contributor_id: string;
+  label: string;
+  symbol?: string | null;
+  interval?: string | null;
+  strategy?: string | null;
+  points: SeriesPoint[];
+};
+
 export type SeriesResponse = {
   series: string;
   selection?: Selection;
   downsampled?: boolean;
   raw_count?: number;
   downsampled_count?: number;
-  data: SeriesPoint[];
+  portfolio: SeriesPoint[];
+  perFile: SeriesContributor[];
+};
+
+type RawSeriesResponse = Omit<SeriesResponse, 'perFile'> & {
+  per_file?: SeriesContributor[];
+  perFile?: SeriesContributor[];
 };
 
 export type HistogramBucket = {
@@ -150,10 +165,23 @@ function seeded(seed: string) {
   };
 }
 
+const NO_DATA_ERROR_CODE = 'NO_DATA';
+const NO_DATA_ERROR_MESSAGE = 'No data matches your selection';
+
+type CodedError = Error & { code?: string };
+
+function raiseResponseError(response: Response): never {
+  if (response.status === 404) {
+    const error = new Error(NO_DATA_ERROR_MESSAGE) as CodedError;
+    error.code = NO_DATA_ERROR_CODE;
+    throw error;
+  }
+  throw new Error(`Request failed: ${response.status}`);
+}
+
 function selectionQuery(selection: Selection, opts?: { downsample?: boolean }) {
   const params = new URLSearchParams();
-  const fileIds = selection.fileIds && selection.fileIds.length ? selection.fileIds : selection.files;
-  fileIds.forEach((file) => params.append('files', file));
+  selection.files.forEach((file) => params.append('files', file));
   selection.symbols.forEach((symbol) => params.append('symbols', symbol));
   selection.intervals.forEach((interval) => params.append('intervals', interval));
   selection.strategies.forEach((strategy) => params.append('strategies', strategy));
@@ -201,11 +229,25 @@ export function mockSeries(selection: Selection, kind: SeriesKind): SeriesRespon
     netpos: 'Net Position',
     margin: 'Margin Usage',
   };
+  const perFile = selection.files.map((id, idx) => {
+    const label = selection.fileLabels?.[id] || id;
+    const modifier = 1 + idx * 0.05;
+    return {
+      contributor_id: id,
+      label,
+      points: points.map((pt) => ({ ...pt, value: pt.value * modifier })),
+      symbol: undefined,
+      interval: undefined,
+      strategy: undefined,
+    };
+  });
   return {
-    label: `${labelByKind[kind]} (${selection.name})`,
-    points,
-    rawCount: points.length,
-    downsampledCount: points.length,
+    series: `${labelByKind[kind]} (${selection.name})`,
+    portfolio: points,
+    perFile,
+    downsampled: false,
+    raw_count: points.length,
+    downsampled_count: points.length,
   };
 }
 
@@ -322,9 +364,14 @@ export async function fetchSeries(selection: Selection, kind: SeriesKind, downsa
   }
   const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    raiseResponseError(response);
   }
-  return (await response.json()) as SeriesResponse;
+  const payload = (await response.json()) as RawSeriesResponse;
+  const { per_file, perFile, ...rest } = payload as RawSeriesResponse & { per_file?: SeriesContributor[] };
+  return {
+    ...rest,
+    perFile: perFile ?? per_file ?? [],
+  };
 }
 
 export async function fetchMetrics(selection: Selection) {
@@ -335,7 +382,7 @@ export async function fetchMetrics(selection: Selection) {
   }
   const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    raiseResponseError(response);
   }
   return (await response.json()) as MetricsRow[];
 }
@@ -348,7 +395,7 @@ export async function fetchHistogram(selection: Selection) {
   }
   const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    raiseResponseError(response);
   }
   return (await response.json()) as HistogramResponse;
 }

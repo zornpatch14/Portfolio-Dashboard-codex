@@ -14,7 +14,7 @@ from fastapi import HTTPException, UploadFile, status
 
 from api.app.compute.caches import PerFileCache
 from api.app.compute.downsampling import downsample_timeseries
-from api.app.compute.portfolio import PortfolioAggregator, PortfolioView
+from api.app.compute.portfolio import ContributorSeries, PortfolioAggregator, PortfolioView
 from api.app.constants import get_contract_spec
 from api.app.ingest import IngestService, TradeFileMetadata
 from api.app.dependencies import selection_hash
@@ -29,6 +29,7 @@ from api.app.schemas import (
     Selection,
     SelectionMeta,
     SeriesPoint,
+    SeriesContributor,
     SeriesResponse,
 )
 
@@ -205,12 +206,12 @@ class DataStore:
         key = selection_hash(selection)
         cache_key = build_selection_key(key, selection.data_version, "portfolio")
 
+        metas = self._metas_for_selection(selection)
+        paths = [Path(m.trades_path) for m in metas]
         cached_view = self._load_portfolio_from_cache(cache_key)
         if cached_view:
             view = cached_view
         else:
-            metas = self._metas_for_selection(selection)
-            paths = [Path(m.trades_path) for m in metas]
             built = self.aggregator.aggregate(
                 paths,
                 metas=metas,
@@ -230,6 +231,7 @@ class DataStore:
             self._portfolio_cache[key] = view
             self._persist_portfolio_to_cache(cache_key, view)
 
+        self._hydrate_contributors(view, metas, selection, paths)
         return self._filter_view_by_date(view, selection)
 
     def _persist_portfolio_to_cache(self, cache_key: str, view: PortfolioView) -> None:
@@ -248,7 +250,6 @@ class DataStore:
                 "daily_returns": to_bytes(view.daily_returns),
                 "net_position": to_bytes(view.net_position),
                 "margin": to_bytes(view.margin),
-                "contributors": [str(p) for p in view.contributors],
                 "spikes": to_bytes(view.spikes) if view.spikes is not None else None,
             }
 
@@ -258,7 +259,6 @@ class DataStore:
                 "daily_returns": base64.b64encode(payload["daily_returns"]).decode(),
                 "net_position": base64.b64encode(payload["net_position"]).decode(),
                 "margin": base64.b64encode(payload["margin"]).decode(),
-                "contributors": payload["contributors"],
                 "spikes": base64.b64encode(payload["spikes"]).decode() if payload["spikes"] is not None else None,
             }
             self._backend.set(cache_key, json.dumps(encoded).encode(), ttl_seconds=self._ttl_seconds)
@@ -286,7 +286,6 @@ class DataStore:
             netpos = decode_frame(encoded.get("net_position"))
             margin = decode_frame(encoded.get("margin"))
             spikes = decode_frame(encoded.get("spikes"))
-            contributors = [Path(p) for p in encoded.get("contributors", [])]
             if equity is None or daily is None or netpos is None or margin is None:
                 return None
             return PortfolioView(
@@ -294,7 +293,7 @@ class DataStore:
                 daily_returns=daily,
                 net_position=netpos,
                 margin=margin,
-                contributors=contributors,
+                contributors=[],
                 spikes=spikes,
             )
         except Exception:
@@ -327,34 +326,118 @@ class DataStore:
             view.spikes = filter_frame(view.spikes, "timestamp")
         if start_dt or end_dt:
             view.daily_returns = filter_frame(view.daily_returns, "date", is_date=True)
+        for contributor in view.contributors:
+            contributor.bundle.equity = filter_frame(contributor.bundle.equity, "timestamp")
+            contributor.bundle.net_position = filter_frame(contributor.bundle.net_position, "timestamp")
+            contributor.bundle.margin = filter_frame(contributor.bundle.margin, "timestamp")
+            contributor.bundle.spikes = filter_frame(contributor.bundle.spikes, "timestamp")
+            if start_dt or end_dt:
+                contributor.bundle.daily_returns = filter_frame(contributor.bundle.daily_returns, "date", is_date=True)
         return view
+
+    def _hydrate_contributors(
+        self,
+        view: PortfolioView,
+        metas: list[TradeFileMetadata],
+        selection: Selection,
+        paths: list[Path] | None = None,
+    ) -> None:
+        if view.contributors:
+            return
+        paths = paths or [Path(m.trades_path) for m in metas]
+        contributors = self.aggregator.build_contributors(
+            paths,
+            metas=metas,
+            contract_multipliers=selection.contract_multipliers,
+            margin_overrides=selection.margin_overrides,
+            direction=selection.direction,
+            include_spikes=selection.spike_flag,
+        )
+        view.contributors = contributors
+
+    def _downsample_frame_for_series(
+        self,
+        frame: pl.DataFrame,
+        timestamp_col: str,
+        value_col: str,
+        downsample: bool,
+    ) -> tuple[pl.DataFrame, int, int]:
+        if frame.is_empty():
+            return frame, 0, 0
+        if not downsample:
+            return frame, len(frame), len(frame)
+        result = downsample_timeseries(frame, timestamp_col, value_col, target_points=2000)
+        return result.downsampled, result.raw_count, result.downsampled_count
+
+    def _frame_from_contributor(
+        self,
+        series_name: str,
+        contributor: ContributorSeries,
+    ) -> tuple[pl.DataFrame, str] | None:
+        bundle = contributor.bundle
+        if series_name == "equity":
+            return bundle.equity, "equity"
+        if series_name in {"equity_percent", "equity-percent"}:
+            equity = bundle.equity
+            if equity.is_empty():
+                percent = pl.DataFrame({"timestamp": [], "percent_equity": []})
+            else:
+                first = float(equity["equity"][0])
+                if first == 0:
+                    percent = pl.DataFrame({"timestamp": [], "percent_equity": []})
+                else:
+                    percent_vals = ((equity["equity"] / first) - 1.0) * 100.0
+                    percent = pl.DataFrame({"timestamp": equity["timestamp"], "percent_equity": percent_vals})
+            return percent, "percent_equity"
+        if series_name in {"drawdown", "intraday_drawdown"}:
+            equity = bundle.equity
+            dd_values = _drawdown_from_equity(equity)
+            frame = pl.DataFrame(dd_values, schema=["timestamp", "drawdown"]) if dd_values else pl.DataFrame(
+                {"timestamp": [], "drawdown": []}
+            )
+            return frame, "drawdown"
+        if series_name == "netpos":
+            return bundle.net_position, "net_position"
+        if series_name == "margin":
+            margin_frame = bundle.margin.select(pl.col("timestamp"), pl.col("margin_used"))
+            return margin_frame, "margin_used"
+        return None
+
+    def _build_per_file_lines(self, series_name: str, view: PortfolioView, downsample: bool) -> list[SeriesContributor]:
+        lines: list[SeriesContributor] = []
+        for contributor in view.contributors:
+            frame_info = self._frame_from_contributor(series_name, contributor)
+            if frame_info is None:
+                continue
+            frame, value_col = frame_info
+            downsampled, _, _ = self._downsample_frame_for_series(frame, "timestamp", value_col, downsample)
+            points = self._to_points(downsampled.iter_rows(named=True), "timestamp", value_col)
+            label = contributor.label or contributor.file_id
+            lines.append(
+                SeriesContributor(
+                    contributor_id=contributor.file_id,
+                    label=label,
+                    symbol=contributor.symbol,
+                    interval=contributor.interval,
+                    strategy=contributor.strategy,
+                    points=points,
+                )
+            )
+        return lines
 
     # ---------------- series & metrics ----------------
     def series(self, series_name: str, selection: Selection, downsample: bool) -> SeriesResponse:
         view = self._view_for_selection(selection)
 
-        def build_timeseries(frame: pl.DataFrame, value_col: str, label: str) -> SeriesResponse:
-            raw = len(frame)
-            sampled = raw
-            if downsample:
-                result = downsample_timeseries(frame, "timestamp", value_col, target_points=2000)
-                frame = result.downsampled
-                raw = result.raw_count
-                sampled = result.downsampled_count
-            data = self._to_points(frame.iter_rows(named=True), "timestamp", value_col)
-            return SeriesResponse(
-                series=label,
-                selection=selection,
-                downsampled=downsample,
-                raw_count=raw,
-                downsampled_count=sampled,
-                data=data,
-            )
-
+        frame: pl.DataFrame | None = None
+        value_col = "value"
+        label = series_name
         if series_name == "equity":
-            return build_timeseries(view.equity, "equity", "equity")
+            frame = view.equity
+            value_col = "equity"
+            label = "equity"
 
-        if series_name in {"equity_percent", "equity-percent"}:
+        elif series_name in {"equity_percent", "equity-percent"}:
             if view.equity.is_empty():
                 percent_frame = pl.DataFrame({"timestamp": [], "percent_equity": []})
             else:
@@ -364,22 +447,43 @@ class DataStore:
                 else:
                     percent_vals = ((view.equity["equity"] / first) - 1.0) * 100.0
                     percent_frame = pl.DataFrame({"timestamp": view.equity["timestamp"], "percent_equity": percent_vals})
-            return build_timeseries(percent_frame, "percent_equity", "equity_percent")
+            frame = percent_frame
+            value_col = "percent_equity"
+            label = "equity_percent"
 
-        if series_name in {"drawdown", "intraday_drawdown"}:
+        elif series_name in {"drawdown", "intraday_drawdown"}:
             dd_values = _drawdown_from_equity(view.equity)
             frame = pl.DataFrame(dd_values, schema=["timestamp", "drawdown"]) if dd_values else pl.DataFrame(
                 {"timestamp": [], "drawdown": []}
             )
-            return build_timeseries(frame, "drawdown", "drawdown")
+            value_col = "drawdown"
+            label = "drawdown"
 
-        if series_name == "netpos":
-            return build_timeseries(view.net_position, "net_position", "netpos")
+        elif series_name == "netpos":
+            frame = view.net_position
+            value_col = "net_position"
+            label = "netpos"
 
-        if series_name == "margin":
-            return build_timeseries(view.margin, "margin_used", "margin")
+        elif series_name == "margin":
+            frame = view.margin
+            value_col = "margin_used"
+            label = "margin"
 
-        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Series not implemented")
+        else:
+            raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Series not implemented")
+
+        downsampled_frame, raw, sampled = self._downsample_frame_for_series(frame, "timestamp", value_col, downsample)
+        data = self._to_points(downsampled_frame.iter_rows(named=True), "timestamp", value_col)
+        per_file_lines = self._build_per_file_lines(series_name, view, downsample)
+        return SeriesResponse(
+            series=label,
+            selection=selection,
+            downsampled=downsample,
+            raw_count=raw,
+            downsampled_count=sampled,
+            portfolio=data,
+            per_file=per_file_lines,
+        )
 
     def histogram(self, selection: Selection, bins: int = 20) -> HistogramResponse:
         view = self._view_for_selection(selection)
