@@ -98,10 +98,10 @@ export default function HomePage() {
         const meta = await getSelectionMeta();
         setSelectionMeta(meta);
         setFilesMeta(meta.files);
-        if (!activeSelection.fileIds || !activeSelection.fileIds.length) {
+        if (!activeSelection.files || !activeSelection.files.length) {
           const ids = meta.files.map((f) => f.file_id);
           const labels = Object.fromEntries(meta.files.map((f) => [f.file_id, f.filename]));
-          setActiveSelection((prev) => ({ ...prev, fileIds: ids, fileLabels: labels, files: ids }));
+          setActiveSelection((prev) => ({ ...prev, fileLabels: labels, files: ids }));
         }
       } catch (error: any) {
         console.warn('Failed to load selection metadata', error);
@@ -125,11 +125,11 @@ export default function HomePage() {
     if (!filesMeta.length) return;
     const ids = filesMeta.map((f) => f.file_id);
     setActiveSelection((prev) => {
-      const current = prev.fileIds && prev.fileIds.length ? prev.fileIds : prev.files;
+      const current = prev.files || [];
       const filtered = current.filter((id) => ids.includes(id));
       const nextFiles = filtered.length ? filtered : ids;
       const labels = Object.fromEntries(filesMeta.map((f) => [f.file_id, f.filename]));
-      return { ...prev, fileIds: nextFiles, files: nextFiles, fileLabels: labels };
+      return { ...prev, files: nextFiles, fileLabels: labels };
     });
   }, [filesMeta]);
 
@@ -147,15 +147,15 @@ export default function HomePage() {
   ] = useQueries({
     queries: [
       ...seriesKinds.map((kind) => ({
-        queryKey: [kind, activeSelection.name, (activeSelection.fileIds || activeSelection.files).join(',')],
+        queryKey: [kind, activeSelection.name, activeSelection.files.join(',')],
         queryFn: () => fetchSeries(activeSelection, kind, includeDownsample),
       })),
       {
-        queryKey: ['histogram', activeSelection.name, (activeSelection.fileIds || activeSelection.files).join(',')],
+        queryKey: ['histogram', activeSelection.name, activeSelection.files.join(',')],
         queryFn: () => fetchHistogram(activeSelection),
       },
       {
-        queryKey: ['metrics', activeSelection.name, (activeSelection.fileIds || activeSelection.files).join(',')],
+        queryKey: ['metrics', activeSelection.name, activeSelection.files.join(',')],
         queryFn: () => fetchMetrics(activeSelection),
       },
     ],
@@ -1296,7 +1296,6 @@ export default function HomePage() {
                 const labels = Object.fromEntries(meta.files.map((f) => [f.file_id, f.filename]));
                 setActiveSelection((prev) => ({
                   ...prev,
-                  fileIds: ids,
                   fileLabels: labels,
                   files: ids,
                 }));

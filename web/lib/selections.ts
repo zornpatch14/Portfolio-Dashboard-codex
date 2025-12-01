@@ -3,7 +3,6 @@ import selectionsData from '../data/selections.json';
 export type Selection = {
   name: string;
   files: string[];
-  fileIds?: string[];
   fileLabels?: Record<string, string>;
   symbols: string[];
   intervals: string[];

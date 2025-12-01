@@ -166,8 +166,7 @@ function seeded(seed: string) {
 
 function selectionQuery(selection: Selection, opts?: { downsample?: boolean }) {
   const params = new URLSearchParams();
-  const fileIds = selection.fileIds && selection.fileIds.length ? selection.fileIds : selection.files;
-  fileIds.forEach((file) => params.append('files', file));
+  selection.files.forEach((file) => params.append('files', file));
   selection.symbols.forEach((symbol) => params.append('symbols', symbol));
   selection.intervals.forEach((interval) => params.append('intervals', interval));
   selection.strategies.forEach((strategy) => params.append('strategies', strategy));
@@ -215,8 +214,7 @@ export function mockSeries(selection: Selection, kind: SeriesKind): SeriesRespon
     netpos: 'Net Position',
     margin: 'Margin Usage',
   };
-  const contributorIds = selection.fileIds && selection.fileIds.length ? selection.fileIds : selection.files;
-  const perFile = contributorIds.map((id, idx) => {
+  const perFile = selection.files.map((id, idx) => {
     const label = selection.fileLabels?.[id] || id;
     const modifier = 1 + idx * 0.05;
     return {
