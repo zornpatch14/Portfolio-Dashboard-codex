@@ -32,13 +32,16 @@ def parse_filename_meta(filename: str) -> tuple[str, int | None, str]:
     base = os.path.basename(filename)
     stem, _ = os.path.splitext(base)
     tokens = stem.split("_")
-    if len(tokens) >= 4 and tokens[0].lower().startswith("tradeslist"):
-        sym = tokens[1].upper()
+
+    # Support temporary prefixes (e.g., tmpabc_tradeslist_ES_15_strategy.xlsx)
+    start_idx = next((i for i, t in enumerate(tokens) if t.lower().startswith("tradeslist")), None)
+    if start_idx is not None and len(tokens) >= start_idx + 4:
+        sym = tokens[start_idx + 1].upper()
         try:
-            interval = int(tokens[2])
+            interval = int(tokens[start_idx + 2])
         except Exception:
             interval = None
-        strat = "_".join(tokens[3:])
+        strat = "_".join(tokens[start_idx + 3 :])
         return sym, interval, strat
     return "UNKNOWN", None, stem
 
@@ -398,6 +401,7 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
 class TradeFileMetadata:
     file_id: str
     filename: str
+    original_filename: str | None
     file_hash: str
     symbol: str
     interval: int | None
@@ -424,6 +428,8 @@ class TradeFileMetadata:
         for key in ["date_min", "date_max"]:
             if data.get(key):
                 data[key] = datetime.fromisoformat(data[key])
+        if "original_filename" not in data:
+            data["original_filename"] = data.get("filename")
         return cls(**data)
 
 
@@ -481,7 +487,7 @@ class IngestService:
         self.mtm_dir = root / "parquet" / "mtm"
         self.index = MetadataIndex(root / "metadata" / "index.json")
 
-    def ingest_file(self, xlsx_path: Path) -> TradeFileMetadata:
+    def ingest_file(self, xlsx_path: Path, original_filename: str | None = None) -> TradeFileMetadata:
         trades_df, mtm_df = parse_tradestation_trades(xlsx_path)
         if trades_df.is_empty():
             raise ValueError(f"No trades parsed from {xlsx_path.name}")
@@ -489,6 +495,8 @@ class IngestService:
         file_hash = _sha256_file(xlsx_path)
         file_id = file_hash[:12]
         data_version = os.getenv("DATA_VERSION")
+        # Preserve the user-provided filename for display.
+        filename = original_filename or os.path.basename(xlsx_path)
 
         self.trades_dir.mkdir(parents=True, exist_ok=True)
         self.mtm_dir.mkdir(parents=True, exist_ok=True)
@@ -523,7 +531,8 @@ class IngestService:
         symbol, interval, strategy = parse_filename_meta(str(xlsx_path))
         meta = TradeFileMetadata(
             file_id=file_id,
-            filename=os.path.basename(xlsx_path),
+            filename=filename,
+            original_filename=filename,
             file_hash=file_hash,
             symbol=symbol,
             interval=interval,

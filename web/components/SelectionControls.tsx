@@ -6,10 +6,11 @@ import { Selection } from '../lib/selections';
 type Props = {
   selection: Selection;
   availableFiles: string[];
+  fileLabelMap: Record<string, string>;
   onChange: (selection: Selection) => void;
 };
 
-export function SelectionControls({ selection, availableFiles, onChange }: Props) {
+export function SelectionControls({ selection, availableFiles, fileLabelMap, onChange }: Props) {
   const toggleFile = (file: string) => {
     const exists = selection.files.includes(file);
     const files = exists ? selection.files.filter((f) => f !== file) : [...selection.files, file];
@@ -21,7 +22,8 @@ export function SelectionControls({ selection, availableFiles, onChange }: Props
     const intervals = new Set<string>();
     const strategies = new Set<string>();
     availableFiles.forEach((file) => {
-      const base = file.split('/').pop() || file;
+      const label = fileLabelMap[file] || file;
+      const base = label.split('/').pop() || label;
       const parts = base.replace(/\.[^.]+$/, '').split('_');
       if (parts.length >= 4) {
         symbols.add(parts[1]);

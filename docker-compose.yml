@@ -21,25 +21,11 @@ services:
     volumes:
       - ./api:/app
       - ./tests/data:/data/tests/data
-      - ./tests/baseline:/data/tests/baseline
       - ./storage:/data/storage
     depends_on:
       - redis
     ports:
       - "8000:8000"
-
-  worker:
-    build:
-      context: ./api
-      dockerfile: Dockerfile
-    command: bash -c "echo 'worker placeholder; wire Celery/RQ later' && sleep infinity"
-    env_file:
-      - .env
-    volumes:
-      - ./api:/app
-      - ./storage:/data/storage
-    depends_on:
-      - redis
 
   web:
     build:

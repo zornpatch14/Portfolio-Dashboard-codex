@@ -6,10 +6,12 @@ export type SeriesPoint = {
 };
 
 export type SeriesResponse = {
-  label: string;
-  points: SeriesPoint[];
-  rawCount?: number;
-  downsampledCount?: number;
+  series: string;
+  selection?: Selection;
+  downsampled?: boolean;
+  raw_count?: number;
+  downsampled_count?: number;
+  data: SeriesPoint[];
 };
 
 export type HistogramBucket = {
@@ -37,6 +39,34 @@ export type CorrelationResponse = {
   matrix: number[][];
   mode: string;
   notes: string[];
+};
+
+export type FileMetadata = {
+  file_id: string;
+  filename: string;
+  symbols: string[];
+  intervals: string[];
+  strategies: string[];
+  date_min?: string | null;
+  date_max?: string | null;
+  mtm_available: boolean;
+  margin_per_contract?: number | null;
+  big_point_value?: number | null;
+};
+
+export type FileUploadResponse = {
+  job_id: string;
+  files: FileMetadata[];
+  message?: string;
+};
+
+export type SelectionMeta = {
+  symbols: string[];
+  intervals: string[];
+  strategies: string[];
+  date_min?: string | null;
+  date_max?: string | null;
+  files: FileMetadata[];
 };
 
 export type OptimizerResult = {
@@ -90,6 +120,9 @@ const endpoint: Record<SeriesKind | 'metrics' | 'histogram', string> = {
 const correlationEndpoint = '/api/v1/correlations';
 const ctaEndpoint = '/api/v1/cta';
 const optimizerEndpoint = '/api/v1/optimizer/allocator';
+const filesEndpoint = '/api/v1/files';
+const selectionMetaEndpoint = '/api/v1/selection/meta';
+const uploadEndpoint = '/api/v1/upload';
 
 async function fetchJson<T>(path: string, fallback: T): Promise<T> {
   if (!API_BASE) return fallback;
@@ -117,18 +150,24 @@ function seeded(seed: string) {
   };
 }
 
-function selectionQuery(selection: Selection) {
+function selectionQuery(selection: Selection, opts?: { downsample?: boolean }) {
   const params = new URLSearchParams();
-  selection.files.forEach((file) => params.append('files', file));
+  const fileIds = selection.fileIds && selection.fileIds.length ? selection.fileIds : selection.files;
+  fileIds.forEach((file) => params.append('files', file));
   selection.symbols.forEach((symbol) => params.append('symbols', symbol));
   selection.intervals.forEach((interval) => params.append('intervals', interval));
   selection.strategies.forEach((strategy) => params.append('strategies', strategy));
   if (selection.direction) params.set('direction', selection.direction);
-  if (selection.start) params.set('start', selection.start);
-  if (selection.end) params.set('end', selection.end);
-  Object.entries(selection.contracts).forEach(([key, val]) => params.append(`contracts[${key}]`, String(val)));
-  Object.entries(selection.margins).forEach(([key, val]) => params.append(`margins[${key}]`, String(val)));
-  params.set('spike', String(selection.spike));
+  if (selection.start) params.set('start_date', selection.start);
+  if (selection.end) params.set('end_date', selection.end);
+  const contractMultipliers = selection.contractMultipliers ?? selection.contracts;
+  const marginOverrides = selection.marginOverrides ?? selection.margins;
+  Object.entries(contractMultipliers).forEach(([key, val]) => params.append('contract_multipliers', `${key}:${val}`));
+  Object.entries(marginOverrides).forEach(([key, val]) => params.append('margin_overrides', `${key}:${val}`));
+  params.set('spike_flag', String(selection.spike));
+  if (opts && opts.downsample !== undefined) {
+    params.set('downsample', String(opts.downsample));
+  }
   return params.toString();
 }
 
@@ -275,25 +314,43 @@ export function mockCta(selection: Selection): CTAResponse {
   };
 }
 
-export async function fetchSeries(selection: Selection, kind: SeriesKind) {
-  const query = selectionQuery(selection);
-  const fallback = mockSeries(selection, kind);
+export async function fetchSeries(selection: Selection, kind: SeriesKind, downsample: boolean = true) {
+  const query = selectionQuery(selection, { downsample });
   const path = `${endpoint[kind]}?${query}`;
-  return fetchJson<SeriesResponse>(path, fallback);
+  if (!API_BASE) {
+    throw new Error('NEXT_PUBLIC_API_BASE is not set; cannot load series data');
+  }
+  const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return (await response.json()) as SeriesResponse;
 }
 
 export async function fetchMetrics(selection: Selection) {
   const query = selectionQuery(selection);
-  const fallback = mockMetrics(selection);
   const path = `${endpoint.metrics}?${query}`;
-  return fetchJson<MetricsRow[]>(path, fallback);
+  if (!API_BASE) {
+    throw new Error('NEXT_PUBLIC_API_BASE is not set; cannot load metrics');
+  }
+  const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return (await response.json()) as MetricsRow[];
 }
 
 export async function fetchHistogram(selection: Selection) {
   const query = selectionQuery(selection);
-  const fallback = mockHistogram(selection);
   const path = `${endpoint.histogram}?${query}`;
-  return fetchJson<HistogramResponse>(path, fallback);
+  if (!API_BASE) {
+    throw new Error('NEXT_PUBLIC_API_BASE is not set; cannot load histogram');
+  }
+  const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return (await response.json()) as HistogramResponse;
 }
 
 export async function fetchCorrelations(selection: Selection, mode: string = 'drawdown_pct') {
@@ -315,4 +372,40 @@ export async function fetchCta(selection: Selection) {
   const fallback = mockCta(selection);
   const path = `${ctaEndpoint}?${query}`;
   return fetchJson<CTAResponse>(path, fallback);
+}
+
+export async function listFiles(): Promise<FileMetadata[]> {
+  if (!API_BASE) {
+    throw new Error('NEXT_PUBLIC_API_BASE is not set; cannot load files');
+  }
+  const response = await fetch(`${API_BASE}${filesEndpoint}`, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return (await response.json()) as FileMetadata[];
+}
+
+export async function getSelectionMeta(): Promise<SelectionMeta> {
+  if (!API_BASE) {
+    throw new Error('NEXT_PUBLIC_API_BASE is not set; cannot load selection metadata');
+  }
+  const response = await fetch(`${API_BASE}${selectionMetaEndpoint}`, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return (await response.json()) as SelectionMeta;
+}
+
+export async function uploadFiles(formData: FormData): Promise<FileUploadResponse> {
+  if (!API_BASE) {
+    throw new Error('NEXT_PUBLIC_API_BASE is not set; cannot upload files');
+  }
+  const response = await fetch(`${API_BASE}${uploadEndpoint}`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error(`Upload failed: ${response.status}`);
+  }
+  return (await response.json()) as FileUploadResponse;
 }

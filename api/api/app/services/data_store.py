@@ -40,9 +40,10 @@ def _meta_to_schema(meta: TradeFileMetadata) -> FileMetadata:
     intervals: list[str] = []
     if meta.interval is not None:
         intervals = [str(meta.interval)]
+    display_name = meta.original_filename or meta.filename
     return FileMetadata(
         file_id=meta.file_id,
-        filename=meta.filename,
+        filename=display_name,
         symbols=[meta.symbol] if meta.symbol else [],
         intervals=intervals,
         strategies=[meta.strategy] if meta.strategy else [],
@@ -101,7 +102,7 @@ class DataStore:
                 tmp_path = Path(tmp.name)
 
             try:
-                meta = self.ingest_service.ingest_file(tmp_path)
+                meta = self.ingest_service.ingest_file(tmp_path, original_filename=upload.filename)
             except ValueError as exc:
                 logger.warning("Ingest failed for %s: %s", upload.filename, exc)
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -233,19 +234,25 @@ class DataStore:
 
     def _persist_portfolio_to_cache(self, cache_key: str, view: PortfolioView) -> None:
         try:
-            payload = {
-                "equity": view.equity.write_parquet(),
-                "daily_returns": view.daily_returns.write_parquet(),
-                "net_position": view.net_position.write_parquet(),
-                "margin": view.margin.write_parquet(),
-                "contributors": [str(p) for p in view.contributors],
-                "spikes": view.spikes.write_parquet() if view.spikes is not None else None,
-            }
+            import io
+            import base64
             import json
 
-            # Parquet bytes are not JSON serializable; store as a dict of base64-encoded bytes.
-            import base64
+            def to_bytes(frame: pl.DataFrame) -> bytes:
+                buf = io.BytesIO()
+                frame.write_parquet(buf)
+                return buf.getvalue()
 
+            payload = {
+                "equity": to_bytes(view.equity),
+                "daily_returns": to_bytes(view.daily_returns),
+                "net_position": to_bytes(view.net_position),
+                "margin": to_bytes(view.margin),
+                "contributors": [str(p) for p in view.contributors],
+                "spikes": to_bytes(view.spikes) if view.spikes is not None else None,
+            }
+
+            # Parquet bytes are not JSON serializable; store as a dict of base64-encoded bytes.
             encoded = {
                 "equity": base64.b64encode(payload["equity"]).decode(),
                 "daily_returns": base64.b64encode(payload["daily_returns"]).decode(),
@@ -346,6 +353,18 @@ class DataStore:
 
         if series_name == "equity":
             return build_timeseries(view.equity, "equity", "equity")
+
+        if series_name in {"equity_percent", "equity-percent"}:
+            if view.equity.is_empty():
+                percent_frame = pl.DataFrame({"timestamp": [], "percent_equity": []})
+            else:
+                first = float(view.equity["equity"][0])
+                if first == 0:
+                    percent_frame = pl.DataFrame({"timestamp": [], "percent_equity": []})
+                else:
+                    percent_vals = ((view.equity["equity"] / first) - 1.0) * 100.0
+                    percent_frame = pl.DataFrame({"timestamp": view.equity["timestamp"], "percent_equity": percent_vals})
+            return build_timeseries(percent_frame, "percent_equity", "equity_percent")
 
         if series_name in {"drawdown", "intraday_drawdown"}:
             dd_values = _drawdown_from_equity(view.equity)

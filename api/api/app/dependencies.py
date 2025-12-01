@@ -3,7 +3,7 @@ import json
 from datetime import date
 from typing import Dict, Iterable, Optional
 
-from fastapi import HTTPException, Query, status
+from fastapi import Depends, HTTPException, Query, status
 
 from .schemas import Selection
 
@@ -53,17 +53,17 @@ def _parse_mapping(entries: Optional[Iterable[str] | str], label: str) -> Dict[s
 class SelectionQueryParams:
     def __init__(
         self,
-        files: Iterable[str] | str | None = Query(default=None, description="File identifiers to include"),
-        symbols: Iterable[str] | str | None = Query(default=None, description="Symbols to filter"),
-        intervals: Iterable[str] | str | None = Query(default=None, description="Intervals to filter"),
-        strategies: Iterable[str] | str | None = Query(default=None, description="Strategies to filter"),
+        files: list[str] | None = Query(default=None, description="File identifiers to include"),
+        symbols: list[str] | None = Query(default=None, description="Symbols to filter"),
+        intervals: list[str] | None = Query(default=None, description="Intervals to filter"),
+        strategies: list[str] | None = Query(default=None, description="Strategies to filter"),
         direction: Optional[str] = Query(default=None, description="Direction filter"),
         start_date: Optional[date] = Query(default=None, description="Inclusive start date (YYYY-MM-DD)"),
         end_date: Optional[date] = Query(default=None, description="Inclusive end date (YYYY-MM-DD)"),
-        contract_multipliers: Iterable[str] | str | None = Query(
+        contract_multipliers: list[str] | None = Query(
             default=None, description="Per-symbol contract multiplier overrides (SYMBOL:VALUE)"
         ),
-        margin_overrides: Iterable[str] | str | None = Query(
+        margin_overrides: list[str] | None = Query(
             default=None, description="Per-symbol margin overrides (SYMBOL:VALUE)"
         ),
         spike_flag: bool = Query(default=False, description="Whether to include spike filter"),
@@ -101,6 +101,11 @@ class DownsampleFlag:
 
     def __call__(self) -> bool:
         return self.downsample
+
+
+def get_selection(params: SelectionQueryParams = Depends(SelectionQueryParams)) -> Selection:
+    """Extract the Selection model from the query param helper."""
+    return params.selection
 
 
 def selection_hash(selection: Selection) -> str:

@@ -15,16 +15,19 @@ import {
   fetchMetrics,
   fetchOptimizer,
   fetchSeries,
+  uploadFiles,
+  getSelectionMeta,
+  listFiles,
   mockCorrelations,
-  mockCta,
-  mockHistogram,
   mockOptimizer,
-  mockSeries,
+  mockCta,
   SeriesKind,
 } from '../lib/api';
 import { loadSampleSelections, Selection } from '../lib/selections';
 
 const selections = loadSampleSelections();
+const SELECTION_STORAGE_KEY = 'portfolio-selection-state';
+const UPLOAD_INPUT_ID = 'upload-input';
 const tabs = [
   { key: 'load-trade-lists', label: 'Load Trade Lists' },
   { key: 'summary', label: 'Summary' },
@@ -53,12 +56,82 @@ export default function HomePage() {
   const [plotMarginEnabled, setPlotMarginEnabled] = useState<Record<string, boolean>>({});
   const [plotHistogramEnabled, setPlotHistogramEnabled] = useState<Record<string, boolean>>({});
   const [riskfolioMode, setRiskfolioMode] = useState<'mean-risk' | 'risk-parity' | 'hierarchical'>('mean-risk');
+  const [selectionMeta, setSelectionMeta] = useState<Awaited<ReturnType<typeof getSelectionMeta>> | null>(null);
+  const [filesMeta, setFilesMeta] = useState<Awaited<ReturnType<typeof listFiles>>>([]);
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const apiBase = process.env.NEXT_PUBLIC_API_BASE;
+  const apiMissing = !apiBase;
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem(SELECTION_STORAGE_KEY) : null;
+      if (stored) {
+        const parsed = JSON.parse(stored) as { selection: Selection; includeDownsample?: boolean };
+        if (parsed.selection) {
+          setActiveSelection(parsed.selection);
+        }
+        if (typeof parsed.includeDownsample === 'boolean') {
+          setIncludeDownsample(parsed.includeDownsample);
+        }
+      }
+    } catch {
+      // ignore corrupted storage
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const payload = JSON.stringify({ selection: activeSelection, includeDownsample });
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(SELECTION_STORAGE_KEY, payload);
+      }
+    } catch {
+      // ignore write failures
+    }
+  }, [activeSelection, includeDownsample]);
+
+  useEffect(() => {
+    if (apiMissing) return;
+    (async () => {
+      try {
+        const meta = await getSelectionMeta();
+        setSelectionMeta(meta);
+        setFilesMeta(meta.files);
+        if (!activeSelection.fileIds || !activeSelection.fileIds.length) {
+          const ids = meta.files.map((f) => f.file_id);
+          const labels = Object.fromEntries(meta.files.map((f) => [f.file_id, f.filename]));
+          setActiveSelection((prev) => ({ ...prev, fileIds: ids, fileLabels: labels, files: ids }));
+        }
+      } catch (error: any) {
+        console.warn('Failed to load selection metadata', error);
+        setErrorMessage(error?.message || 'Failed to load selection metadata');
+      }
+    })();
+  }, [apiMissing]);
 
   const availableFiles = useMemo(
-    () => Array.from(new Set(selections.flatMap((s) => s.files))).sort(),
-    [],
+    () => (filesMeta.length ? filesMeta.map((f) => f.file_id).sort() : Array.from(new Set(selections.flatMap((s) => s.files))).sort()),
+    [filesMeta],
   );
+
+  const fileLabelMap = useMemo(
+    () => Object.fromEntries(filesMeta.map((f) => [f.file_id, f.filename])),
+    [filesMeta],
+  );
+
+  // Keep selection files aligned with files reported by the API.
+  useEffect(() => {
+    if (!filesMeta.length) return;
+    const ids = filesMeta.map((f) => f.file_id);
+    setActiveSelection((prev) => {
+      const current = prev.fileIds && prev.fileIds.length ? prev.fileIds : prev.files;
+      const filtered = current.filter((id) => ids.includes(id));
+      const nextFiles = filtered.length ? filtered : ids;
+      const labels = Object.fromEntries(filesMeta.map((f) => [f.file_id, f.filename]));
+      return { ...prev, fileIds: nextFiles, files: nextFiles, fileLabels: labels };
+    });
+  }, [filesMeta]);
 
   const seriesKinds: SeriesKind[] = ['equity', 'equityPercent', 'drawdown', 'intradayDrawdown', 'netpos', 'margin'];
 
@@ -74,30 +147,28 @@ export default function HomePage() {
   ] = useQueries({
     queries: [
       ...seriesKinds.map((kind) => ({
-        queryKey: [kind, activeSelection.name, activeSelection.files.join(',')],
-        queryFn: () => fetchSeries(activeSelection, kind),
-        initialData: mockSeries(activeSelection, kind),
+        queryKey: [kind, activeSelection.name, (activeSelection.fileIds || activeSelection.files).join(',')],
+        queryFn: () => fetchSeries(activeSelection, kind, includeDownsample),
       })),
       {
-        queryKey: ['histogram', activeSelection.name, activeSelection.files.join(',')],
+        queryKey: ['histogram', activeSelection.name, (activeSelection.fileIds || activeSelection.files).join(',')],
         queryFn: () => fetchHistogram(activeSelection),
-        initialData: mockHistogram(activeSelection),
       },
       {
-        queryKey: ['metrics', activeSelection.name, activeSelection.files.join(',')],
+        queryKey: ['metrics', activeSelection.name, (activeSelection.fileIds || activeSelection.files).join(',')],
         queryFn: () => fetchMetrics(activeSelection),
-        initialData: [],
       },
     ],
   });
 
   useEffect(() => {
-    const series = equityQuery.data ?? mockSeries(activeSelection, 'equity');
-    const timestamps = series.points?.map((p) => p.timestamp).filter(Boolean) ?? [];
+    const points = equityQuery.data?.data ?? [];
+    const timestamps = points.map((p) => p.timestamp).filter(Boolean) ?? [];
     if (!timestamps.length) return;
     const sorted = [...timestamps].sort();
-    const rangeStart = sorted[0];
-    const rangeEnd = sorted[sorted.length - 1];
+    const toDate = (ts: string) => ts.slice(0, 10);
+    const rangeStart = toDate(sorted[0]);
+    const rangeEnd = toDate(sorted[sorted.length - 1]);
     setActiveSelection((prev) => {
       const nextStart = prev.start ?? rangeStart;
       const nextEnd = prev.end ?? rangeEnd;
@@ -107,8 +178,9 @@ export default function HomePage() {
   }, [equityQuery.data, activeSelection.name]);
 
   const deriveFileMeta = useMemo(() => {
-    return (file: string) => {
-      const base = file.split('/').pop() || file;
+    return (fileId: string) => {
+      const label = fileLabelMap[fileId] || fileId;
+      const base = label.split('/').pop() || label;
       const parts = base.replace(/\.[^.]+$/, '').split('_');
       return {
         symbol: parts[1] || '',
@@ -116,94 +188,17 @@ export default function HomePage() {
         strategy: parts.slice(3).join('_') || '',
       };
     };
-  }, []);
+  }, [fileLabelMap]);
 
   const equityLines = useMemo(() => {
-    const files = availableFiles.filter((file) => {
-      if (!activeSelection.files.includes(file)) return false;
-      const meta = deriveFileMeta(file);
-      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
-      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
-      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
-      const contracts = activeSelection.contracts[file] ?? 1;
-      if (contracts === 0) return false;
-      return true;
-    });
-
-    const startDate = activeSelection.start;
-    const endDate = activeSelection.end;
-
-    const perFile = files.map((file) => {
-      const contracts = activeSelection.contracts[file] ?? 1;
-      const mockSelection = { ...activeSelection, name: file, files: [file] };
-      const base = mockSeries(mockSelection, 'equity');
-      const filteredPoints = base.points.filter((p) => {
-        if (startDate && p.timestamp < startDate) return false;
-        if (endDate && p.timestamp > endDate) return false;
-        return true;
-      });
-      return {
-        name: file,
-        points: filteredPoints.map((p) => ({ ...p, value: p.value * contracts })),
-      };
-    });
-
-    const allTimestamps = Array.from(
-      new Set(perFile.flatMap((s) => s.points.map((p) => p.timestamp))),
-    ).sort();
-    const portfolioPoints = allTimestamps.map((ts) => {
-      const sum = perFile.reduce((acc, series) => {
-        const point = series.points.find((p) => p.timestamp === ts);
-        return acc + (point?.value ?? 0);
-      }, 0);
-      return { timestamp: ts, value: sum };
-    });
-
-    return { perFile, portfolio: portfolioPoints };
-  }, [availableFiles, activeSelection, deriveFileMeta]);
+    const portfolioPoints = (equityQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    return { perFile: [], portfolio: portfolioPoints };
+  }, [equityQuery.data]);
 
   const equityPercentLines = useMemo(() => {
-    const files = availableFiles.filter((file) => {
-      if (!activeSelection.files.includes(file)) return false;
-      const meta = deriveFileMeta(file);
-      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
-      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
-      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
-      const contracts = activeSelection.contracts[file] ?? 1;
-      if (contracts === 0) return false;
-      return true;
-    });
-
-    const startDate = activeSelection.start;
-    const endDate = activeSelection.end;
-
-    const perFile = files.map((file) => {
-      const mockSelection = { ...activeSelection, name: file, files: [file] };
-      const base = mockSeries(mockSelection, 'equityPercent');
-      const filteredPoints = base.points.filter((p) => {
-        if (startDate && p.timestamp < startDate) return false;
-        if (endDate && p.timestamp > endDate) return false;
-        return true;
-      });
-      return {
-        name: file,
-        points: filteredPoints,
-      };
-    });
-
-    const allTimestamps = Array.from(
-      new Set(perFile.flatMap((s) => s.points.map((p) => p.timestamp))),
-    ).sort();
-    const portfolioPoints = allTimestamps.map((ts) => {
-      const sum = perFile.reduce((acc, series) => {
-        const point = series.points.find((p) => p.timestamp === ts);
-        return acc + (point?.value ?? 0);
-      }, 0);
-      return { timestamp: ts, value: sum };
-    });
-
-    return { perFile, portfolio: portfolioPoints };
-  }, [availableFiles, activeSelection, deriveFileMeta]);
+    const portfolioPoints = (equityPctQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    return { perFile: [], portfolio: portfolioPoints };
+  }, [equityPctQuery.data]);
 
   useEffect(() => {
     const names = new Set<string>();
@@ -223,48 +218,9 @@ export default function HomePage() {
   }, [equityLines.perFile, equityPercentLines.perFile]);
 
   const drawdownLines = useMemo(() => {
-    const files = availableFiles.filter((file) => {
-      if (!activeSelection.files.includes(file)) return false;
-      const meta = deriveFileMeta(file);
-      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
-      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
-      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
-      const contracts = activeSelection.contracts[file] ?? 1;
-      if (contracts === 0) return false;
-      return true;
-    });
-
-    const startDate = activeSelection.start;
-    const endDate = activeSelection.end;
-
-    const perFile = files.map((file) => {
-      const contracts = activeSelection.contracts[file] ?? 1;
-      const mockSelection = { ...activeSelection, name: file, files: [file] };
-      const base = mockSeries(mockSelection, 'drawdown');
-      const filteredPoints = base.points.filter((p) => {
-        if (startDate && p.timestamp < startDate) return false;
-        if (endDate && p.timestamp > endDate) return false;
-        return true;
-      });
-      return {
-        name: file,
-        points: filteredPoints.map((p) => ({ ...p, value: p.value * contracts })),
-      };
-    });
-
-    const allTimestamps = Array.from(
-      new Set(perFile.flatMap((s) => s.points.map((p) => p.timestamp))),
-    ).sort();
-    const portfolioPoints = allTimestamps.map((ts) => {
-      const sum = perFile.reduce((acc, series) => {
-        const point = series.points.find((p) => p.timestamp === ts);
-        return acc + (point?.value ?? 0);
-      }, 0);
-      return { timestamp: ts, value: sum };
-    });
-
-    return { perFile, portfolio: portfolioPoints };
-  }, [availableFiles, activeSelection, deriveFileMeta]);
+    const portfolioPoints = (drawdownQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    return { perFile: [], portfolio: portfolioPoints };
+  }, [drawdownQuery.data]);
 
   const drawdownPercentLines = useMemo(() => {
     const equityBase = accountEquity || 1;
@@ -294,91 +250,14 @@ export default function HomePage() {
   }, [drawdownLines.perFile]);
 
   const marginLines = useMemo(() => {
-    const files = availableFiles.filter((file) => {
-      if (!activeSelection.files.includes(file)) return false;
-      const meta = deriveFileMeta(file);
-      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
-      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
-      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
-      const contracts = activeSelection.contracts[file] ?? 1;
-      if (contracts === 0) return false;
-      return true;
-    });
-
-    const startDate = activeSelection.start;
-    const endDate = activeSelection.end;
-
-    const perFile = files.map((file) => {
-      const contracts = activeSelection.contracts[file] ?? 1;
-      const mockSelection = { ...activeSelection, name: file, files: [file] };
-      const base = mockSeries(mockSelection, 'margin');
-      const filteredPoints = base.points.filter((p) => {
-        if (startDate && p.timestamp < startDate) return false;
-        if (endDate && p.timestamp > endDate) return false;
-        return true;
-      });
-      return {
-        name: file,
-        points: filteredPoints.map((p) => ({ ...p, value: p.value * contracts })),
-      };
-    });
-
-    const allTimestamps = Array.from(
-      new Set(perFile.flatMap((s) => s.points.map((p) => p.timestamp))),
-    ).sort();
-    const portfolioPoints = allTimestamps.map((ts) => {
-      const sum = perFile.reduce((acc, series) => {
-        const point = series.points.find((p) => p.timestamp === ts);
-        return acc + (point?.value ?? 0);
-      }, 0);
-      return { timestamp: ts, value: sum };
-    });
-
-    return { perFile, portfolio: portfolioPoints };
-  }, [availableFiles, activeSelection, deriveFileMeta]);
+    const portfolioPoints = (marginQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    return { perFile: [], portfolio: portfolioPoints };
+  }, [marginQuery.data]);
 
   const netposLines = useMemo(() => {
-    const files = availableFiles.filter((file) => {
-      if (!activeSelection.files.includes(file)) return false;
-      const meta = deriveFileMeta(file);
-      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
-      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
-      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
-      const contracts = activeSelection.contracts[file] ?? 1;
-      if (contracts === 0) return false;
-      return true;
-    });
-
-    const startDate = activeSelection.start;
-    const endDate = activeSelection.end;
-
-    const perFile = files.map((file) => {
-      const mockSelection = { ...activeSelection, name: file, files: [file] };
-      const base = mockSeries(mockSelection, 'netpos');
-      const filteredPoints = base.points.filter((p) => {
-        if (startDate && p.timestamp < startDate) return false;
-        if (endDate && p.timestamp > endDate) return false;
-        return true;
-      });
-      return {
-        name: file,
-        points: filteredPoints.map((p) => ({ ...p, value: p.value })),
-      };
-    });
-
-    const allTimestamps = Array.from(
-      new Set(perFile.flatMap((s) => s.points.map((p) => p.timestamp))),
-    ).sort();
-    const portfolioPoints = allTimestamps.map((ts) => {
-      const sum = perFile.reduce((acc, series) => {
-        const point = series.points.find((p) => p.timestamp === ts);
-        return acc + (point?.value ?? 0);
-      }, 0);
-      return { timestamp: ts, value: sum };
-    });
-
-    return { perFile, portfolio: portfolioPoints };
-  }, [availableFiles, activeSelection, deriveFileMeta]);
+    const portfolioPoints = (netposQuery.data?.data ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    return { perFile: [], portfolio: portfolioPoints };
+  }, [netposQuery.data]);
 
   const purchasingPowerLines = useMemo(() => {
     const timeline = Array.from(
@@ -440,25 +319,9 @@ export default function HomePage() {
   }, [purchasingPowerLines.perFile]);
 
   const histogramData = useMemo(() => {
-    const files = availableFiles.filter((file) => {
-      if (!activeSelection.files.includes(file)) return false;
-      const meta = deriveFileMeta(file);
-      if (activeSelection.symbols.length && meta.symbol && !activeSelection.symbols.includes(meta.symbol)) return false;
-      if (activeSelection.intervals.length && meta.interval && !activeSelection.intervals.includes(meta.interval)) return false;
-      if (activeSelection.strategies.length && meta.strategy && !activeSelection.strategies.includes(meta.strategy)) return false;
-      const contracts = activeSelection.contracts[file] ?? 1;
-      if (contracts === 0) return false;
-      return true;
-    });
-
-    const perFile = files.map((file) => {
-      const mockSelection = { ...activeSelection, name: file, files: [file] };
-      const hist = mockHistogram(mockSelection);
-      return { name: file, buckets: hist.buckets };
-    });
-
-    return perFile;
-  }, [availableFiles, activeSelection, deriveFileMeta]);
+    const portfolioBuckets = histogramQuery.data?.buckets ?? [];
+    return portfolioBuckets.length ? [{ name: 'Portfolio', buckets: portfolioBuckets }] : [];
+  }, [histogramQuery.data]);
 
   useEffect(() => {
     const names = new Set<string>();
@@ -565,55 +428,71 @@ export default function HomePage() {
 
       <div className="charts-grid" style={{ marginTop: 18 }}>
         <div className="card">
-          <SeriesChart title="Equity Curve" series={equityQuery.data ?? mockSeries(activeSelection, 'equity')} color="#4cc3ff" />
+          {equityQuery.data ? (
+            <SeriesChart title="Equity Curve" series={equityQuery.data} color="#4cc3ff" />
+          ) : (
+            <div className="placeholder-text">No equity data.</div>
+          )}
           <div className="text-muted small">
-            Points: {equityQuery.data?.downsampledCount ?? equityQuery.data?.points.length ?? 0}
+            Points: {equityQuery.data?.downsampled_count ?? equityQuery.data?.data.length ?? 0}
           </div>
         </div>
         <div className="card">
-          <SeriesChart
-            title="Percent Equity"
-            series={equityPctQuery.data ?? mockSeries(activeSelection, 'equityPercent')}
-            color="#8fe3c7"
-          />
+          {equityPctQuery.data ? (
+            <SeriesChart title="Percent Equity" series={equityPctQuery.data} color="#8fe3c7" />
+          ) : (
+            <div className="placeholder-text">No percent equity data.</div>
+          )}
           <div className="text-muted small">
-            Points: {equityPctQuery.data?.downsampledCount ?? equityPctQuery.data?.points.length ?? 0}
+            Points: {equityPctQuery.data?.downsampled_count ?? equityPctQuery.data?.data.length ?? 0}
           </div>
         </div>
         <div className="card">
-          <SeriesChart
-            title="Drawdown"
-            series={drawdownQuery.data ?? mockSeries(activeSelection, 'drawdown')}
-            color="#ff8f6b"
-          />
+          {drawdownQuery.data ? (
+            <SeriesChart title="Drawdown" series={drawdownQuery.data} color="#ff8f6b" />
+          ) : (
+            <div className="placeholder-text">No drawdown data.</div>
+          )}
           <div className="text-muted small">
-            Points: {drawdownQuery.data?.downsampledCount ?? drawdownQuery.data?.points.length ?? 0}
+            Points: {drawdownQuery.data?.downsampled_count ?? drawdownQuery.data?.data.length ?? 0}
           </div>
         </div>
         <div className="card">
-          <SeriesChart
-            title="Intraday Drawdown"
-            series={intradayDdQuery.data ?? mockSeries(activeSelection, 'intradayDrawdown')}
-            color="#f4c95d"
-          />
+          {intradayDdQuery.data ? (
+            <SeriesChart title="Intraday Drawdown" series={intradayDdQuery.data} color="#f4c95d" />
+          ) : (
+            <div className="placeholder-text">No intraday drawdown data.</div>
+          )}
           <div className="text-muted small">
-            Points: {intradayDdQuery.data?.downsampledCount ?? intradayDdQuery.data?.points.length ?? 0}
+            Points: {intradayDdQuery.data?.downsampled_count ?? intradayDdQuery.data?.data.length ?? 0}
           </div>
         </div>
         <div className="card">
-          <SeriesChart title="Net Position" series={netposQuery.data ?? mockSeries(activeSelection, 'netpos')} color="#9f8bff" />
+          {netposQuery.data ? (
+            <SeriesChart title="Net Position" series={netposQuery.data} color="#9f8bff" />
+          ) : (
+            <div className="placeholder-text">No net position data.</div>
+          )}
           <div className="text-muted small">
-            Points: {netposQuery.data?.downsampledCount ?? netposQuery.data?.points.length ?? 0}
+            Points: {netposQuery.data?.downsampled_count ?? netposQuery.data?.data.length ?? 0}
           </div>
         </div>
         <div className="card">
-          <SeriesChart title="Margin Usage" series={marginQuery.data ?? mockSeries(activeSelection, 'margin')} color="#54ffd0" />
+          {marginQuery.data ? (
+            <SeriesChart title="Margin Usage" series={marginQuery.data} color="#54ffd0" />
+          ) : (
+            <div className="placeholder-text">No margin data.</div>
+          )}
           <div className="text-muted small">
-            Points: {marginQuery.data?.downsampledCount ?? marginQuery.data?.points.length ?? 0}
+            Points: {marginQuery.data?.downsampled_count ?? marginQuery.data?.data.length ?? 0}
           </div>
         </div>
         <div className="card">
-          <HistogramChart histogram={histogramQuery.data ?? mockHistogram(activeSelection)} />
+          {histogramQuery.data ? (
+            <HistogramChart histogram={histogramQuery.data} />
+          ) : (
+            <div className="placeholder-text">No histogram data.</div>
+          )}
           <div className="text-muted small">
             Distribution: {histogramQuery.data?.buckets.length ?? 0} buckets
           </div>
@@ -1154,14 +1033,16 @@ export default function HomePage() {
         {activeBadge}
       </div>
       <div className="card" style={{ marginTop: 12 }}>
-        <SeriesChart
-          title="Intraday Drawdown"
-          series={intradayDdQuery.data ?? mockSeries(activeSelection, 'intradayDrawdown')}
-          color="#f4c95d"
-        />
-        <div className="text-muted small">
-          Points: {intradayDdQuery.data?.downsampledCount ?? intradayDdQuery.data?.points.length ?? 0}
-        </div>
+        {intradayDdQuery.data ? (
+          <>
+            <SeriesChart title="Intraday Drawdown" series={intradayDdQuery.data} color="#f4c95d" />
+            <div className="text-muted small">
+              Points: {intradayDdQuery.data?.downsampled_count ?? intradayDdQuery.data?.data.length ?? 0}
+            </div>
+          </>
+        ) : (
+          <div className="placeholder-text">No intraday drawdown data.</div>
+        )}
       </div>
     </div>
   );
@@ -1259,8 +1140,7 @@ export default function HomePage() {
 
       {(() => {
         const activeHists = histogramData.filter((h) => plotHistogramEnabled[h.name] !== false);
-        const fallback = histogramQuery.data ?? mockHistogram(activeSelection);
-        const bucketOrder = activeHists[0]?.buckets.map((b) => b.bucket) ?? fallback.buckets.map((b) => b.bucket);
+        const bucketOrder = activeHists[0]?.buckets.map((b) => b.bucket) ?? [];
         const bucketMap = new Map(bucketOrder.map((b) => [b, 0]));
         activeHists.forEach((hist) => {
           hist.buckets.forEach((bucket) => {
@@ -1370,8 +1250,51 @@ export default function HomePage() {
       </p>
 
       <div className="card" style={{ marginTop: 14 }}>
-        <div className="upload-area">Drag & drop or select .xlsx files</div>
-        <div className="text-muted small" style={{ marginTop: 6 }}>Uploads mirror Dash (multiple files, persistent list).</div>
+        <div className="upload-area">
+          <label htmlFor={UPLOAD_INPUT_ID} style={{ cursor: 'pointer', display: 'block' }}>
+            Drag & drop or select .xlsx files
+          </label>
+          <input
+            id={UPLOAD_INPUT_ID}
+            type="file"
+            accept=".xlsx"
+            multiple
+            style={{ display: 'none' }}
+            onChange={async (event) => {
+              const files = event.target.files;
+              if (!files || !files.length) return;
+              const formData = new FormData();
+              Array.from(files).forEach((file) => formData.append('files', file));
+              try {
+                setUploadStatus('Uploading...');
+                const response = await uploadFiles(formData);
+                setUploadStatus(`Upload job ${response.job_id} completed (${response.files.length} files ingested)`);
+                const meta = await getSelectionMeta();
+                setSelectionMeta(meta);
+                setFilesMeta(meta.files);
+                const ids = meta.files.map((f) => f.file_id);
+                const labels = Object.fromEntries(meta.files.map((f) => [f.file_id, f.filename]));
+                setActiveSelection((prev) => ({
+                  ...prev,
+                  fileIds: ids,
+                  fileLabels: labels,
+                  files: ids,
+                }));
+              } catch (error) {
+                setUploadStatus('Upload failed');
+                setErrorMessage(error instanceof Error ? error.message : 'Upload failed');
+              } finally {
+                if (event.target) {
+                  event.target.value = '';
+                }
+              }
+            }}
+          />
+        </div>
+        <div className="text-muted small" style={{ marginTop: 6 }}>
+          Uploads mirror Dash (multiple files, persistent list).
+          {uploadStatus ? ` ${uploadStatus}` : ''}
+        </div>
       </div>
 
       <div className="grid-2" style={{ marginTop: 14 }}>
@@ -1405,13 +1328,14 @@ export default function HomePage() {
             </button>
           </div>
           <div className="file-rows" style={{ marginTop: 10, display: 'grid', gap: 10 }}>
-            {availableFiles.map((file) => {
-              const active = activeSelection.files.includes(file);
-              const contractValue = activeSelection.contracts[file] ?? 1;
-              const marginValue = activeSelection.margins[file] ?? '';
+            {availableFiles.map((fileId) => {
+              const label = fileLabelMap[fileId] || fileId;
+              const active = activeSelection.files.includes(fileId);
+              const contractValue = activeSelection.contracts[fileId] ?? 1;
+              const marginValue = activeSelection.margins[fileId] ?? '';
               return (
                 <div
-                  key={file}
+                  key={fileId}
                   className="card"
                   style={{
                     padding: '10px 12px',
@@ -1427,12 +1351,12 @@ export default function HomePage() {
                     onClick={() =>
                       setActiveSelection((prev) => ({
                         ...prev,
-                        files: active ? prev.files.filter((f) => f !== file) : [...prev.files, file],
+                        files: active ? prev.files.filter((f) => f !== fileId) : [...prev.files, fileId],
                       }))
                     }
                     style={{ justifyContent: 'flex-start' }}
                   >
-                    {file}
+                    {label}
                   </button>
                   <input
                     type="number"
@@ -1444,7 +1368,7 @@ export default function HomePage() {
                       const next = Number(event.target.value);
                       setActiveSelection((prev) => ({
                         ...prev,
-                        contracts: { ...prev.contracts, [file]: Number.isNaN(next) ? 0 : next },
+                        contracts: { ...prev.contracts, [fileId]: Number.isNaN(next) ? 0 : next },
                       }));
                     }}
                     placeholder="Contracts"
@@ -1459,7 +1383,7 @@ export default function HomePage() {
                       const next = Number(event.target.value);
                       setActiveSelection((prev) => ({
                         ...prev,
-                        margins: { ...prev.margins, [file]: Number.isNaN(next) ? 0 : next },
+                        margins: { ...prev.margins, [fileId]: Number.isNaN(next) ? 0 : next },
                       }));
                     }}
                     placeholder="Margin $/contract"
@@ -1489,7 +1413,7 @@ export default function HomePage() {
       </div>
 
       <div style={{ marginTop: 12 }}>
-        <SelectionControls selection={activeSelection} availableFiles={availableFiles} onChange={setActiveSelection} />
+        <SelectionControls selection={activeSelection} availableFiles={availableFiles} fileLabelMap={fileLabelMap} onChange={setActiveSelection} />
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
@@ -1505,13 +1429,15 @@ export default function HomePage() {
             </tr>
           </thead>
           <tbody>
-            {availableFiles.map((file) => (
-              <tr key={file}>
-                <td>{file}</td>
-                <td>Auto-parsed</td>
-                <td>15 / 30 / 60</td>
-                <td>Strategy A/B</td>
-                <td>Rolling</td>
+            {filesMeta.map((file) => (
+              <tr key={file.file_id}>
+                <td>{file.filename}</td>
+                <td>{file.symbols.join(', ')}</td>
+                <td>{file.intervals.join(', ')}</td>
+                <td>{file.strategies.join(', ')}</td>
+                <td>
+                  {file.date_min || file.date_max ? `${file.date_min || '—'} to ${file.date_max || '—'}` : '—'}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -1565,6 +1491,21 @@ export default function HomePage() {
 
   return (
     <div className="page">
+      {errorMessage && (
+        <div className="panel" style={{ borderColor: '#ff6b6b', background: 'rgba(255, 107, 107, 0.08)' }}>
+          <div className="text-muted small">
+            {errorMessage}
+            <button
+              type="button"
+              className="button"
+              style={{ marginLeft: 10 }}
+              onClick={() => setErrorMessage(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       <div className="panel" style={{ marginBottom: 12 }}>
         <div className="flex gap-sm" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
@@ -1576,7 +1517,7 @@ export default function HomePage() {
                 </span>
               ) : (
                 <span>
-                  <span className="status-dot" style={{ background: '#ffcb6b' }} /> Using mock data until NEXT_PUBLIC_API_BASE is set
+                  <span className="status-dot" style={{ background: '#ffcb6b' }} /> API base not configured; set NEXT_PUBLIC_API_BASE to load live data
                 </span>
               )}
             </div>
@@ -1603,6 +1544,14 @@ export default function HomePage() {
           </button>
         </div>
       </div>
+
+      {apiMissing && (
+        <div className="panel" style={{ borderColor: '#ffcb6b', background: 'rgba(255, 203, 107, 0.06)' }}>
+          <div className="text-muted small">
+            Live uploads, series, metrics, and histogram calls are disabled until NEXT_PUBLIC_API_BASE is set.
+          </div>
+        </div>
+      )}
 
       <div className="panel" style={{ overflow: 'hidden' }}>
         <div className="tabs">
