@@ -6,9 +6,23 @@ from typing import Iterable, Optional
 
 import polars as pl
 
-from api.app.compute.caches import PerFileCache
+from api.app.compute.caches import PerFileCache, SeriesBundle
 from api.app.compute.downsampling import DownsampleResult, downsample_timeseries
 from api.app.ingest import TradeFileMetadata
+
+
+_EMPTY_SPIKES = pl.DataFrame({"timestamp": [], "marker_value": [], "drawdown": [], "runup": [], "trade_no": []})
+
+
+@dataclass
+class ContributorSeries:
+    file_id: str
+    path: Path
+    bundle: SeriesBundle
+    label: str
+    symbol: str | None = None
+    interval: str | None = None
+    strategy: str | None = None
 
 
 @dataclass
@@ -17,7 +31,7 @@ class PortfolioView:
     daily_returns: pl.DataFrame
     net_position: pl.DataFrame
     margin: pl.DataFrame
-    contributors: list[Path]
+    contributors: list[ContributorSeries]
     spikes: pl.DataFrame | None = None
 
 
@@ -46,32 +60,18 @@ class PortfolioAggregator:
                 spikes=pl.DataFrame({"timestamp": [], "marker_value": [], "drawdown": [], "runup": [], "trade_no": []}) if include_spikes else None,
             )
 
-        meta_map = {m.file_id: m for m in metas} if metas else {}
-        contract_multipliers = contract_multipliers or {}
-        margin_overrides = margin_overrides or {}
+        contributors = self.build_contributors(
+            files,
+            metas=metas,
+            contract_multipliers=contract_multipliers,
+            margin_overrides=margin_overrides,
+            direction=direction,
+            include_spikes=include_spikes,
+        )
 
-        def overrides_for(path: Path) -> tuple[float | None, float | None]:
-            file_id = path.stem
-            symbol = None
-            meta = meta_map.get(file_id)
-            if meta:
-                symbol = (meta.symbol or "").upper()
-            cmult = contract_multipliers.get(symbol, None)
-            margin = margin_overrides.get(symbol, None)
-            return cmult, margin
-
-        daily_frames = []
-        netpos_frames = []
-        margin_frames = []
-        spike_frames: list[pl.DataFrame] = []
-
-        for path in files:
-            cmult, marg = overrides_for(path)
-            daily_frames.append(self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg, direction=direction))
-            netpos_frames.append(self.cache.net_position(path, contract_multiplier=cmult, margin_override=marg, direction=direction))
-            margin_frames.append(self.cache.margin_usage(path, contract_multiplier=cmult, margin_override=marg, direction=direction))
-            if include_spikes:
-                spike_frames.append(self.cache.spike_overlay(path, contract_multiplier=cmult, direction=direction))
+        daily_frames = [c.bundle.daily_returns for c in contributors]
+        netpos_frames = [c.bundle.net_position for c in contributors]
+        margin_frames = [c.bundle.margin for c in contributors]
 
         combined_daily = pl.concat(daily_frames).group_by("date").agg(
             pnl=pl.col("pnl").sum(),
@@ -92,16 +92,68 @@ class PortfolioAggregator:
 
         netpos = _combine_timeseries(netpos_frames, "net_position")
         margin = _combine_timeseries(margin_frames, "margin_used")
-        spikes_df = pl.concat(spike_frames).sort("timestamp") if include_spikes and spike_frames else None
+        spikes_df = None
+        if include_spikes:
+            spike_frames = [c.bundle.spikes for c in contributors if len(c.bundle.spikes)]
+            spikes_df = pl.concat(spike_frames).sort("timestamp") if spike_frames else None
 
         return PortfolioView(
             equity=equity_curve,
             daily_returns=combined_daily,
             net_position=netpos,
             margin=margin,
-            contributors=files,
+            contributors=contributors,
             spikes=spikes_df,
         )
+
+    def build_contributors(
+        self,
+        files: Iterable[Path],
+        metas: Optional[Iterable[TradeFileMetadata]] = None,
+        contract_multipliers: Optional[dict[str, float]] = None,
+        margin_overrides: Optional[dict[str, float]] = None,
+        direction: Optional[str] = None,
+        include_spikes: bool = False,
+    ) -> list[ContributorSeries]:
+        meta_map = {m.file_id: m for m in metas} if metas else {}
+        contract_multipliers = contract_multipliers or {}
+        margin_overrides = margin_overrides or {}
+
+        def overrides_for(path: Path) -> tuple[float | None, float | None, TradeFileMetadata | None]:
+            file_id = path.stem
+            meta = meta_map.get(file_id)
+            symbol = (meta.symbol or "").upper() if meta and meta.symbol else None
+            cmult = contract_multipliers.get(symbol, None)
+            margin = margin_overrides.get(symbol, None)
+            return cmult, margin, meta
+
+        contributors: list[ContributorSeries] = []
+        for path in files:
+            cmult, marg, meta = overrides_for(path)
+            equity = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=marg, direction=direction)
+            daily = self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg, direction=direction)
+            netpos = self.cache.net_position(path, contract_multiplier=cmult, margin_override=marg, direction=direction)
+            margin_usage = self.cache.margin_usage(path, contract_multiplier=cmult, margin_override=marg, direction=direction)
+            spikes_df = self.cache.spike_overlay(path, contract_multiplier=cmult, direction=direction) if include_spikes else _EMPTY_SPIKES
+            label = (meta.original_filename or meta.filename) if meta else path.name
+            contributors.append(
+                ContributorSeries(
+                    file_id=path.stem,
+                    path=path,
+                    bundle=SeriesBundle(
+                        equity=equity,
+                        daily_returns=daily,
+                        net_position=netpos,
+                        margin=margin_usage,
+                        spikes=spikes_df,
+                    ),
+                    label=label,
+                    symbol=(meta.symbol or "").upper() if meta and meta.symbol else None,
+                    interval=str(meta.interval) if meta and meta.interval is not None else None,
+                    strategy=meta.strategy or None,
+                )
+            )
+        return contributors
 
     def downsample_equity(self, view: PortfolioView, target_points: int = 2000) -> DownsampleResult:
         return downsample_timeseries(view.equity, "timestamp", "equity", target_points=target_points)
