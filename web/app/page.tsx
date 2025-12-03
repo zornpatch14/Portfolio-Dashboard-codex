@@ -1729,10 +1729,9 @@ export default function HomePage() {
                     }}
                     placeholder="Contracts"
                   />
-                  <input
-                    type="number"
-                    min={0}
-                    step={100}
+                  <input
+                    type="number"
+                    step={100}
                     className="input"
                     style={{ opacity: filteredOut ? 0.5 : 1 }}
                     value={marginValue}
