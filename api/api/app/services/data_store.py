@@ -171,13 +171,28 @@ class DataStore:
         start_date = selection.start_date
         end_date = selection.end_date
 
+        symbol_dimension_active = any(m.symbol for m in filtered)
+        interval_dimension_active = any(m.interval is not None for m in filtered)
+        strategy_dimension_active = any(m.strategy for m in filtered)
+
+        if symbol_dimension_active and not symbols:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No files match selection filters")
+        if interval_dimension_active and not intervals:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No files match selection filters")
+        if strategy_dimension_active and not strategies:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No files match selection filters")
+
         def keep(meta: TradeFileMetadata) -> bool:
-            if symbols and meta.symbol and meta.symbol not in symbols:
-                return False
-            if intervals and meta.interval is not None and str(meta.interval) not in intervals:
-                return False
-            if strategies and meta.strategy and meta.strategy not in strategies:
-                return False
+            if symbol_dimension_active:
+                if not meta.symbol or meta.symbol not in symbols:
+                    return False
+            if interval_dimension_active:
+                interval_val = str(meta.interval) if meta.interval is not None else None
+                if not interval_val or interval_val not in intervals:
+                    return False
+            if strategy_dimension_active:
+                if not meta.strategy or meta.strategy not in strategies:
+                    return False
             if start_date and meta.date_max and meta.date_max.date() < start_date:
                 return False
             if end_date and meta.date_min and meta.date_min.date() > end_date:
