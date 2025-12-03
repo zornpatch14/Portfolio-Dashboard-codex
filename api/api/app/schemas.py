@@ -25,34 +25,36 @@ class FileUploadResponse(BaseModel):
     message: str = "ingest scheduled"
 
 
-class Selection(BaseModel):
-    files: List[str] = Field(default_factory=list)
-    symbols: List[str] = Field(default_factory=list)
-    intervals: List[str] = Field(default_factory=list)
-    strategies: List[str] = Field(default_factory=list)
-    direction: Optional[str] = None
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    contract_multipliers: Dict[str, float] = Field(
-        default_factory=dict,
-        description="Per-file contract multipliers (FILE_ID:VALUE)",
-    )
-    margin_overrides: Dict[str, float] = Field(
-        default_factory=dict,
-        description="Per-file margin overrides (FILE_ID:VALUE)",
-    )
-    spike_flag: bool = False
-    data_version: Optional[str] = None
+class Selection(BaseModel):
+    files: List[str] = Field(default_factory=list)
+    symbols: List[str] = Field(default_factory=list)
+    intervals: List[str] = Field(default_factory=list)
+    strategies: List[str] = Field(default_factory=list)
+    direction: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    contract_multipliers: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-file contract multipliers (FILE_ID:VALUE)",
+    )
+    margin_overrides: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-file margin overrides (FILE_ID:VALUE)",
+    )
+    spike_flag: bool = False
+    data_version: Optional[str] = None
+    account_equity: float | None = None
 
 
-class SelectionMeta(BaseModel):
-    symbols: List[str]
-    intervals: List[str]
-    strategies: List[str]
-    date_min: Optional[date]
-    date_max: Optional[date]
-    files: List[FileMetadata]
-
+class SelectionMeta(BaseModel):
+    symbols: List[str]
+    intervals: List[str]
+    strategies: List[str]
+    date_min: Optional[date]
+    date_max: Optional[date]
+    files: List[FileMetadata]
+    account_equity: float
+
 
 class SeriesPoint(BaseModel):
     timestamp: datetime

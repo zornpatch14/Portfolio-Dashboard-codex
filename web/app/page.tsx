@@ -39,6 +39,7 @@ const MARGIN_DEFAULTS: Record<string, number> = {
   NG: 3800,
 };
 const FALLBACK_MARGIN = 10000;
+const ACCOUNT_EQUITY_FALLBACK = 25000;
 
 const tabs = [
   { key: 'load-trade-lists', label: 'Load Trade Lists' },
@@ -76,7 +77,6 @@ export default function HomePage() {
   const [activeSelection, setActiveSelection] = useState<Selection>(selections[0]);
   const [activeTab, setActiveTab] = useState<TabKey>('load-trade-lists');
   const [corrMode, setCorrMode] = useState('drawdown_pct');
-  const [accountEquity, setAccountEquity] = useState(50000);
   const [includeDownsample, setIncludeDownsample] = useState(true);
   const [exportFormat, setExportFormat] = useState<'csv' | 'parquet'>('parquet');
   const [plotEnabled, setPlotEnabled] = useState<Record<string, boolean>>({});
@@ -84,12 +84,13 @@ export default function HomePage() {
   const [plotMarginEnabled, setPlotMarginEnabled] = useState<Record<string, boolean>>({});
   const [plotHistogramEnabled, setPlotHistogramEnabled] = useState<Record<string, boolean>>({});
   const [riskfolioMode, setRiskfolioMode] = useState<'mean-risk' | 'risk-parity' | 'hierarchical'>('mean-risk');
-  const [selectionMeta, setSelectionMeta] = useState<Awaited<ReturnType<typeof getSelectionMeta>> | null>(null);
+  const [selectionMeta, setSelectionMeta] = useState<Awaited<ReturnType<typeof getSelectionMeta>> | null>(null);
   const [filesMeta, setFilesMeta] = useState<Awaited<ReturnType<typeof listFiles>>>([]);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const apiBase = process.env.NEXT_PUBLIC_API_BASE;
   const apiMissing = !apiBase;
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const accountEquity = activeSelection.accountEquity ?? selectionMeta?.account_equity ?? ACCOUNT_EQUITY_FALLBACK;
 
   useEffect(() => {
     try {
@@ -119,19 +120,35 @@ export default function HomePage() {
     }
   }, [activeSelection, includeDownsample]);
 
-  useEffect(() => {
-    if (apiMissing) return;
-    (async () => {
-      try {
-        const meta = await getSelectionMeta();
-        setSelectionMeta(meta);
-        setFilesMeta(meta.files);
-      } catch (error: any) {
-        console.warn('Failed to load selection metadata', error);
-        setErrorMessage(error?.message || 'Failed to load selection metadata');
-      }
-    })();
-  }, [apiMissing]);
+  useEffect(() => {
+    if (apiMissing) return;
+    (async () => {
+      try {
+        const meta = await getSelectionMeta();
+        setSelectionMeta(meta);
+        setFilesMeta(meta.files);
+      } catch (error: any) {
+        console.warn('Failed to load selection metadata', error);
+        setErrorMessage(error?.message || 'Failed to load selection metadata');
+      }
+    })();
+  }, [apiMissing]);
+
+  useEffect(() => {
+    if (activeSelection.accountEquity !== undefined && activeSelection.accountEquity !== null) {
+      return;
+    }
+    const defaultEquity = selectionMeta?.account_equity ?? ACCOUNT_EQUITY_FALLBACK;
+    setActiveSelection((prev) => {
+      if (prev.accountEquity !== undefined && prev.accountEquity !== null) {
+        return prev;
+      }
+      return {
+        ...prev,
+        accountEquity: defaultEquity,
+      };
+    });
+  }, [selectionMeta, activeSelection.accountEquity]);
 
   const availableFiles = useMemo(
     () => (filesMeta.length ? filesMeta.map((f) => f.file_id).sort() : Array.from(new Set(selections.flatMap((s) => s.files))).sort()),
@@ -391,10 +408,10 @@ export default function HomePage() {
 
   const filteredFileSet = useMemo(() => new Set(filteredFileIds), [filteredFileIds]);
 
-  const selectionForFetch = useMemo(
-    () => normalizeSelection({ ...activeSelection, files: filteredFileIds }),
-    [activeSelection, filteredFileIds],
-  );
+  const selectionForFetch = useMemo(
+    () => normalizeSelection({ ...activeSelection, files: filteredFileIds, accountEquity }),
+    [activeSelection, filteredFileIds, accountEquity],
+  );
 
   const selectionKey = useMemo(() => JSON.stringify(selectionForFetch), [selectionForFetch]);
 
@@ -1744,13 +1761,19 @@ export default function HomePage() {
       <div className="grid-2" style={{ marginTop: 14 }}>
         <div className="card">
           <strong>Account equity</strong>
-          <input
-            className="input"
-            type="number"
-            value={accountEquity}
-            onChange={(event) => setAccountEquity(Number(event.target.value))}
-            style={{ marginTop: 8, maxWidth: 240 }}
-          />
+          <input
+            className="input"
+            type="number"
+            value={accountEquity}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              setActiveSelection((prev) => ({
+                ...prev,
+                accountEquity: Number.isNaN(next) ? 0 : next,
+              }));
+            }}
+            style={{ marginTop: 8, maxWidth: 240 }}
+          />
           <div className="text-muted small" style={{ marginTop: 8 }}>
             Mirrors Dash account equity input (used for purchasing power, allocator seed, and margin tab).
           </div>

@@ -14,7 +14,8 @@
     "margins": {},
     "spike": false,
     "contractMultipliers": {},
-    "marginOverrides": {}
+    "marginOverrides": {},
+    "accountEquity": 25000
   },
   {
     "name": "mes15_single",
@@ -31,7 +32,8 @@
     "margins": {},
     "spike": false,
     "contractMultipliers": {},
-    "marginOverrides": {}
+    "marginOverrides": {},
+    "accountEquity": 25000
   },
   {
     "name": "mnq60_single",
@@ -48,7 +50,8 @@
     "margins": {},
     "spike": false,
     "contractMultipliers": {},
-    "marginOverrides": {}
+    "marginOverrides": {},
+    "accountEquity": 25000
   },
   {
     "name": "ng60_single",
@@ -65,7 +68,8 @@
     "margins": {},
     "spike": false,
     "contractMultipliers": {},
-    "marginOverrides": {}
+    "marginOverrides": {},
+    "accountEquity": 25000
   },
   {
     "name": "cd_jy_combo",
@@ -83,7 +87,8 @@
     "margins": {},
     "spike": false,
     "contractMultipliers": {},
-    "marginOverrides": {}
+    "marginOverrides": {},
+    "accountEquity": 25000
   },
   {
     "name": "mnq_mes_pair",
@@ -101,7 +106,8 @@
     "margins": {},
     "spike": false,
     "contractMultipliers": {},
-    "marginOverrides": {}
+    "marginOverrides": {},
+    "accountEquity": 25000
   },
   {
     "name": "all_files_combo",
@@ -123,6 +129,7 @@
     "margins": {},
     "spike": false,
     "contractMultipliers": {},
-    "marginOverrides": {}
+    "marginOverrides": {},
+    "accountEquity": 25000
   }
 ]

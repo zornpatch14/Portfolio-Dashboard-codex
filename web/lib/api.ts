@@ -75,14 +75,15 @@ export type FileUploadResponse = {
   message?: string;
 };
 
-export type SelectionMeta = {
-  symbols: string[];
-  intervals: string[];
-  strategies: string[];
-  date_min?: string | null;
-  date_max?: string | null;
-  files: FileMetadata[];
-};
+export type SelectionMeta = {
+  symbols: string[];
+  intervals: string[];
+  strategies: string[];
+  date_min?: string | null;
+  date_max?: string | null;
+  files: FileMetadata[];
+  account_equity: number;
+};
 
 export type OptimizerResult = {
   summary: {
@@ -179,9 +180,9 @@ function raiseResponseError(response: Response): never {
   throw new Error(`Request failed: ${response.status}`);
 }
 
-function selectionQuery(selection: Selection, opts?: { downsample?: boolean }) {
-  const params = new URLSearchParams();
-  selection.files.forEach((file) => params.append('files', file));
+function selectionQuery(selection: Selection, opts?: { downsample?: boolean }) {
+  const params = new URLSearchParams();
+  selection.files.forEach((file) => params.append('files', file));
   selection.symbols.forEach((symbol) => params.append('symbols', symbol));
   selection.intervals.forEach((interval) => params.append('intervals', interval));
   selection.strategies.forEach((strategy) => params.append('strategies', strategy));
@@ -190,12 +191,15 @@ function selectionQuery(selection: Selection, opts?: { downsample?: boolean }) {
   if (selection.end) params.set('end_date', selection.end);
   const contractMultipliers = selection.contractMultipliers ?? {};
   const marginOverrides = selection.marginOverrides ?? {};
-  Object.entries(contractMultipliers).forEach(([key, val]) => params.append('contract_multipliers', `${key}:${val}`));
-  Object.entries(marginOverrides).forEach(([key, val]) => params.append('margin_overrides', `${key}:${val}`));
-  params.set('spike_flag', String(selection.spike));
-  if (opts && opts.downsample !== undefined) {
-    params.set('downsample', String(opts.downsample));
-  }
+  Object.entries(contractMultipliers).forEach(([key, val]) => params.append('contract_multipliers', `${key}:${val}`));
+  Object.entries(marginOverrides).forEach(([key, val]) => params.append('margin_overrides', `${key}:${val}`));
+  params.set('spike_flag', String(selection.spike));
+  if (selection.accountEquity !== undefined && selection.accountEquity !== null) {
+    params.set('account_equity', String(selection.accountEquity));
+  }
+  if (opts && opts.downsample !== undefined) {
+    params.set('downsample', String(opts.downsample));
+  }
   return params.toString();
 }
 

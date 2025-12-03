@@ -27,7 +27,7 @@ class PerFileCache:
     def __init__(
         self,
         storage_dir: Path | str | None = None,
-        starting_equity: float = 100_000.0,
+        starting_equity: float = DEFAULT_ACCOUNT_EQUITY,
         margin_per_contract: float | None = None,
         contract_multiplier: float = 1.0,
         data_version: str | None = None,

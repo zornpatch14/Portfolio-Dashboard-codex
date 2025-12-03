@@ -33,6 +33,7 @@ MARGIN_SPEC: Dict[str, ContractSpec] = {
 
 DEFAULT_CONTRACT_MULTIPLIER = 1.0
 DEFAULT_MARGIN_PER_CONTRACT = 10_000.0
+DEFAULT_ACCOUNT_EQUITY = 25_000.0
 
 
 def get_contract_spec(symbol: str) -> ContractSpec:

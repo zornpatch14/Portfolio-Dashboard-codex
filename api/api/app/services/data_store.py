@@ -135,14 +135,17 @@ class DataStore:
         strategies = sorted({s for f in files for s in f.strategies})
         date_min = min((f.date_min for f in files if f.date_min), default=None)
         date_max = max((f.date_max for f in files if f.date_max), default=None)
-        return SelectionMeta(
-            symbols=symbols,
-            intervals=intervals,
-            strategies=strategies,
-            date_min=date_min,
-            date_max=date_max,
-            files=files,
-        )
+        from api.app.constants import DEFAULT_ACCOUNT_EQUITY
+
+        return SelectionMeta(
+            symbols=symbols,
+            intervals=intervals,
+            strategies=strategies,
+            date_min=date_min,
+            date_max=date_max,
+            files=files,
+            account_equity=DEFAULT_ACCOUNT_EQUITY,
+        )
 
     # ---------------- helpers ----------------
     def _paths_for_selection(self, selection: Selection) -> list[Path]:
@@ -261,8 +264,9 @@ class DataStore:
             self._portfolio_cache[key] = view
             self._persist_portfolio_to_cache(cache_key, view)
 
-        self._hydrate_contributors(view, metas, selection, paths, trades_map)
-        return self._filter_view_by_date(view, selection)
+        self._hydrate_contributors(view, metas, selection, paths, trades_map)
+        view = self._apply_account_equity(view, selection.account_equity)
+        return self._filter_view_by_date(view, selection)
 
     def _persist_portfolio_to_cache(self, cache_key: str, view: PortfolioView) -> None:
         try:
@@ -365,27 +369,40 @@ class DataStore:
                 contributor.bundle.daily_returns = filter_frame(contributor.bundle.daily_returns, "date", is_date=True)
         return view
 
-    def _hydrate_contributors(
-        self,
-        view: PortfolioView,
-        metas: list[TradeFileMetadata],
-        selection: Selection,
+    def _hydrate_contributors(
+        self,
+        view: PortfolioView,
+        metas: list[TradeFileMetadata],
+        selection: Selection,
         paths: list[Path] | None = None,
         loaded_trades: dict[str, LoadedTrades] | None = None,
     ) -> None:
         if view.contributors:
             return
         paths = paths or [Path(m.trades_path) for m in metas]
-        contributors = self.aggregator.build_contributors(
-            paths,
-            metas=metas,
-            contract_multipliers=selection.contract_multipliers,
-            margin_overrides=selection.margin_overrides,
-            direction=selection.direction,
-            include_spikes=selection.spike_flag,
-            loaded_trades=loaded_trades,
-        )
-        view.contributors = contributors
+        contributors = self.aggregator.build_contributors(
+            paths,
+            metas=metas,
+            contract_multipliers=selection.contract_multipliers,
+            margin_overrides=selection.margin_overrides,
+            direction=selection.direction,
+            include_spikes=selection.spike_flag,
+            loaded_trades=loaded_trades,
+        )
+        view.contributors = contributors
+
+    def _apply_account_equity(self, view: PortfolioView, account_equity: float | None) -> PortfolioView:
+        if account_equity is None:
+            return view
+        delta = account_equity - self.cache.starting_equity
+        if delta == 0:
+            return view
+        view.equity = view.equity.with_columns((pl.col("equity") + delta).alias("equity"))
+        for contributor in view.contributors:
+            contributor.bundle.equity = contributor.bundle.equity.with_columns(
+                (pl.col("equity") + delta).alias("equity")
+            )
+        return view
 
     def _downsample_frame_for_series(
         self,
@@ -534,16 +551,18 @@ class DataStore:
 
         return HistogramResponse(label="return_distribution", selection=selection, buckets=buckets)
 
-    def metrics(self, selection: Selection) -> MetricsResponse:
-        metas = self._metas_for_selection(selection)
-        paths = [Path(m.trades_path) for m in metas]
-        loaded_trades = self._load_trades_map(metas)
-        rows: list[MetricsRow] = []
-        direction = selection.direction
-
-        def _filter_direction(df: pl.DataFrame) -> pl.DataFrame:
-            if not direction or "direction" not in df.columns:
-                return df
+    def metrics(self, selection: Selection) -> MetricsResponse:
+        metas = self._metas_for_selection(selection)
+        paths = [Path(m.trades_path) for m in metas]
+        loaded_trades = self._load_trades_map(metas)
+        rows: list[MetricsRow] = []
+        direction = selection.direction
+        account_equity = selection.account_equity if selection.account_equity is not None else self.cache.starting_equity
+        equity_delta = account_equity - self.cache.starting_equity
+
+        def _filter_direction(df: pl.DataFrame) -> pl.DataFrame:
+            if not direction or "direction" not in df.columns:
+                return df
             dir_norm = direction.lower()
             dir_col = pl.col("direction").cast(pl.Utf8).str.to_lowercase()
             if dir_norm == "long":
@@ -555,20 +574,22 @@ class DataStore:
             return df.filter(mask)
 
         # Per-file metrics
-        for meta in metas:
-            path = Path(meta.trades_path)
-            cmult = selection.contract_multipliers.get(meta.file_id)
-            marg = selection.margin_overrides.get(meta.file_id)
-            loaded = loaded_trades.get(meta.file_id)
+        for meta in metas:
+            path = Path(meta.trades_path)
+            cmult = selection.contract_multipliers.get(meta.file_id)
+            marg = selection.margin_overrides.get(meta.file_id)
+            loaded = loaded_trades.get(meta.file_id)
             if loaded is None:
                 loaded = self.cache.load_trades(path)
                 loaded_trades[meta.file_id] = loaded
 
-            equity = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=meta.file_id)
-            trades_df = _filter_direction(loaded.trades)
-            daily = self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=meta.file_id)
-
-            net_profit = float(equity["equity"][-1] - self.cache.starting_equity) if len(equity) else 0.0
+            equity = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=meta.file_id)
+            if equity_delta != 0:
+                equity = equity.with_columns((pl.col("equity") + equity_delta).alias("equity"))
+            trades_df = _filter_direction(loaded.trades)
+            daily = self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=meta.file_id)
+
+            net_profit = float(equity["equity"][-1] - account_equity) if len(equity) else 0.0
             trades = len(trades_df)
             wins = int((trades_df["net_profit"] > 0).sum()) if trades else 0
             win_rate = (wins / trades * 100.0) if trades else 0.0
@@ -587,9 +608,9 @@ class DataStore:
             add("avg_daily_return", avg_daily)
 
         # Portfolio metrics
-        view = self._view_for_selection(selection, metas=metas, loaded_trades=loaded_trades)
-        if len(view.equity):
-            portfolio_net = float(view.equity["equity"][-1] - self.cache.starting_equity)
+        view = self._view_for_selection(selection, metas=metas, loaded_trades=loaded_trades)
+        if len(view.equity):
+            portfolio_net = float(view.equity["equity"][-1] - account_equity)
             port_dd = _max_drawdown(view.equity)
             port_daily = float(view.daily_returns["daily_return"].mean()) if len(view.daily_returns) else 0.0
             dir_trades = sum(len(_filter_direction(loaded_trades[p.stem].trades)) for p in paths)

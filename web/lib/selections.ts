@@ -1,22 +1,23 @@
 import selectionsData from '../data/selections.json';
 
-export type Selection = {
-  name: string;
-  files: string[];
-  fileLabels?: Record<string, string>;
-  symbols: string[];
-  intervals: string[];
-  strategies: string[];
-  direction: string;
-  start: string | null;
-  end: string | null;
-  contracts: Record<string, number>;
-  margins: Record<string, number>;
-  contractMultipliers?: Record<string, number>;
-  marginOverrides?: Record<string, number>;
-  spike: boolean;
-  downsample?: boolean;
-};
+export type Selection = {
+  name: string;
+  files: string[];
+  fileLabels?: Record<string, string>;
+  symbols: string[];
+  intervals: string[];
+  strategies: string[];
+  direction: string;
+  start: string | null;
+  end: string | null;
+  contracts: Record<string, number>;
+  margins: Record<string, number>;
+  contractMultipliers?: Record<string, number>;
+  marginOverrides?: Record<string, number>;
+  spike: boolean;
+  downsample?: boolean;
+  accountEquity?: number | null;
+};
 
 export function loadSampleSelections(): Selection[] {
   // Mirrored from tests/baseline/selections.json to keep the UI aligned with parity fixtures.
@@ -53,18 +54,19 @@ function sortMap<T>(map: Record<string, T> | undefined): Record<string, T> | und
   return Object.fromEntries(entries.sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' })));
 }
 
-export function normalizeSelection(selection: Selection): Selection {
-  const normalizedContracts = sortMap(selection.contractMultipliers ?? selection.contracts) || {};
-  const normalizedMargins = sortMap(selection.marginOverrides ?? selection.margins) || {};
-  return {
-    ...selection,
+export function normalizeSelection(selection: Selection): Selection {
+  const normalizedContracts = sortMap(selection.contractMultipliers ?? selection.contracts) || {};
+  const normalizedMargins = sortMap(selection.marginOverrides ?? selection.margins) || {};
+  return {
+    ...selection,
     files: [...(selection.files || [])].sort(),
     symbols: [...(selection.symbols || [])].map((symbol) => symbol.toUpperCase()).sort(),
     intervals: sortNumericStrings(selection.intervals || []),
     strategies: [...(selection.strategies || [])].sort(),
-    contracts: normalizedContracts,
-    margins: normalizedMargins,
-    contractMultipliers: normalizedContracts,
-    marginOverrides: normalizedMargins,
-  };
-}
+    contracts: normalizedContracts,
+    margins: normalizedMargins,
+    contractMultipliers: normalizedContracts,
+    marginOverrides: normalizedMargins,
+    accountEquity: selection.accountEquity ?? null,
+  };
+}
