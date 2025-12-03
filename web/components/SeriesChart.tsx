@@ -23,9 +23,8 @@ export default function SeriesChart({ title, series, color = '#4cc3ff' }: Props)
       grid: { left: 40, right: 20, top: 40, bottom: 30 },
       title: { text: title, left: 0, top: 0, textStyle: { color: '#e6edf7', fontSize: 14 } },
       xAxis: {
-        type: 'category',
+        type: 'time',
         boundaryGap: false,
-        data: points.map((p) => p.timestamp),
         axisLine: { lineStyle: { color: '#334b76' } },
         axisLabel: { color: '#a5b2c9' },
       },
@@ -41,7 +40,7 @@ export default function SeriesChart({ title, series, color = '#4cc3ff' }: Props)
           type: 'line',
           smooth: true,
           showSymbol: false,
-          data: points.map((p) => p.value),
+          data: points.map((p) => [p.timestamp, p.value]),
           areaStyle: {
             opacity: 0.2,
             color,
