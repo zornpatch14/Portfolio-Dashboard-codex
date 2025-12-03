@@ -57,7 +57,15 @@ class PerFileCache:
                 return pl.DataFrame({"mtm_date": [], "mtm_net_profit": [], "mtm_session_start": [], "mtm_session_end": []})
         return pl.DataFrame({"mtm_date": [], "mtm_net_profit": [], "mtm_session_start": [], "mtm_session_end": []})
 
-    def equity_curve(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
+    def equity_curve(
+        self,
+        path: Path,
+        contract_multiplier: float | None = None,
+        margin_override: float | None = None,
+        direction: str | None = None,
+        loaded: LoadedTrades | None = None,
+        file_id: str | None = None,
+    ) -> pl.DataFrame:
         return self._get_or_build(
             path,
             "equity",
@@ -65,9 +73,19 @@ class PerFileCache:
             contract_multiplier,
             margin_override,
             direction,
+            loaded=loaded,
+            file_id=file_id,
         )
 
-    def daily_returns(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
+    def daily_returns(
+        self,
+        path: Path,
+        contract_multiplier: float | None = None,
+        margin_override: float | None = None,
+        direction: str | None = None,
+        loaded: LoadedTrades | None = None,
+        file_id: str | None = None,
+    ) -> pl.DataFrame:
         return self._get_or_build(
             path,
             "daily_returns",
@@ -75,9 +93,19 @@ class PerFileCache:
             contract_multiplier,
             margin_override,
             direction,
+            loaded=loaded,
+            file_id=file_id,
         )
 
-    def net_position(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
+    def net_position(
+        self,
+        path: Path,
+        contract_multiplier: float | None = None,
+        margin_override: float | None = None,
+        direction: str | None = None,
+        loaded: LoadedTrades | None = None,
+        file_id: str | None = None,
+    ) -> pl.DataFrame:
         """Return point-in-time net position series; cache intervals when no overrides applied."""
 
         intervals = self._get_or_build(
@@ -87,10 +115,20 @@ class PerFileCache:
             contract_multiplier,
             margin_override,
             direction,
+            loaded=loaded,
+            file_id=file_id,
         )
         return intervals.select(pl.col("start").alias("timestamp"), pl.col("net_position"))
 
-    def margin_usage(self, path: Path, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
+    def margin_usage(
+        self,
+        path: Path,
+        contract_multiplier: float | None = None,
+        margin_override: float | None = None,
+        direction: str | None = None,
+        loaded: LoadedTrades | None = None,
+        file_id: str | None = None,
+    ) -> pl.DataFrame:
         """Return margin usage intervals (timestamp=interval start) with caching when no overrides."""
 
         intervals = self._get_or_build(
@@ -100,10 +138,19 @@ class PerFileCache:
             contract_multiplier,
             margin_override,
             direction,
+            loaded=loaded,
+            file_id=file_id,
         )
         return intervals.select(pl.col("start").alias("timestamp"), pl.col("margin_used"), pl.col("symbol"))
 
-    def spike_overlay(self, path: Path, contract_multiplier: float | None = None, direction: str | None = None) -> pl.DataFrame:
+    def spike_overlay(
+        self,
+        path: Path,
+        contract_multiplier: float | None = None,
+        direction: str | None = None,
+        loaded: LoadedTrades | None = None,
+        file_id: str | None = None,
+    ) -> pl.DataFrame:
         return self._get_or_build(
             path,
             "spikes",
@@ -111,15 +158,17 @@ class PerFileCache:
             contract_multiplier,
             None,
             direction,
+            loaded=loaded,
+            file_id=file_id,
         )
 
-    def bundle(self, path: Path) -> SeriesBundle:
+    def bundle(self, path: Path, loaded: LoadedTrades | None = None, file_id: str | None = None) -> SeriesBundle:
         return SeriesBundle(
-            equity=self.equity_curve(path),
-            daily_returns=self.daily_returns(path),
-            net_position=self.net_position(path),
-            margin=self.margin_usage(path),
-            spikes=self.spike_overlay(path),
+            equity=self.equity_curve(path, loaded=loaded, file_id=file_id),
+            daily_returns=self.daily_returns(path, loaded=loaded, file_id=file_id),
+            net_position=self.net_position(path, loaded=loaded, file_id=file_id),
+            margin=self.margin_usage(path, loaded=loaded, file_id=file_id),
+            spikes=self.spike_overlay(path, loaded=loaded, file_id=file_id),
         )
 
     # ---------- cache helpers ----------
@@ -145,11 +194,25 @@ class PerFileCache:
         contract_multiplier: float | None = None,
         margin_override: float | None = None,
         direction: str | None = None,
+        loaded: LoadedTrades | None = None,
+        file_id: str | None = None,
     ) -> pl.DataFrame:
-        loaded = self.load_trades(path)
-        target = self._artifact_path(loaded.file_id, artifact, contract_multiplier, margin_override, direction)
+        """Load cached artifact or build and persist it for the given file."""
+
+        file_identifier = file_id or (loaded.file_id if loaded else None)
+        if file_identifier is None:
+            loaded = self.load_trades(path)
+            file_identifier = loaded.file_id
+
+        target = self._artifact_path(file_identifier, artifact, contract_multiplier, margin_override, direction)
         if target.exists():
-            return pl.read_parquet(target)
+            try:
+                return pl.read_parquet(target)
+            except Exception:
+                target.unlink(missing_ok=True)
+
+        if loaded is None:
+            loaded = self.load_trades(path)
 
         df = builder(loaded)
         df.write_parquet(target)

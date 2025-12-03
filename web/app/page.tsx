@@ -23,7 +23,7 @@ import {
   mockCta,
   SeriesKind,
 } from '../lib/api';
-import { loadSampleSelections, Selection } from '../lib/selections';
+import { loadSampleSelections, normalizeSelection, Selection } from '../lib/selections';
 
 const selections = loadSampleSelections();
 const SELECTION_STORAGE_KEY = 'portfolio-selection-state';
@@ -43,6 +43,15 @@ const tabs = [
 ] as const;
 const NO_DATA_MESSAGE = 'No data matches your selection.';
 const GENERIC_ERROR_MESSAGE = 'Failed to load data.';
+const STALE_TIME = Infinity;
+
+type FilterValueMap = {
+  symbols: string[];
+  intervals: string[];
+  strategies: string[];
+};
+
+const arraysEqual = (a: string[] = [], b: string[] = []) => a.length === b.length && a.every((val, idx) => val === b[idx]);
 
 const isNoDataError = (error: unknown): boolean => Boolean(error && (error as any).code === 'NO_DATA');
 
@@ -105,11 +114,6 @@ export default function HomePage() {
         const meta = await getSelectionMeta();
         setSelectionMeta(meta);
         setFilesMeta(meta.files);
-        if (!activeSelection.files || !activeSelection.files.length) {
-          const ids = meta.files.map((f) => f.file_id);
-          const labels = Object.fromEntries(meta.files.map((f) => [f.file_id, f.filename]));
-          setActiveSelection((prev) => ({ ...prev, fileLabels: labels, files: ids }));
-        }
       } catch (error: any) {
         console.warn('Failed to load selection metadata', error);
         setErrorMessage(error?.message || 'Failed to load selection metadata');
@@ -146,18 +150,87 @@ export default function HomePage() {
     return map;
   }, [filesMeta]);
 
-  // Keep selection files aligned with files reported by the API.
-  useEffect(() => {
-    if (!filesMeta.length) return;
-    const ids = filesMeta.map((f) => f.file_id);
-    setActiveSelection((prev) => {
-      const current = prev.files || [];
-      const filtered = current.filter((id) => ids.includes(id));
-      const nextFiles = filtered.length ? filtered : ids;
-      const labels = Object.fromEntries(filesMeta.map((f) => [f.file_id, f.filename]));
-      return { ...prev, files: nextFiles, fileLabels: labels };
+  const availableFilterValues = useMemo<FilterValueMap>(() => {
+    const symbolSet = new Set<string>();
+    const intervalSet = new Set<string>();
+    const strategySet = new Set<string>();
+
+    availableFiles.forEach((fileId) => {
+      const meta = fileMetaMap.get(fileId);
+      const fallback = deriveFileMeta(fileId);
+      const symbols =
+        meta && meta.symbols.length
+          ? meta.symbols
+          : fallback.symbol
+            ? [fallback.symbol]
+            : [];
+      const intervals =
+        meta && meta.intervals.length
+          ? meta.intervals
+          : fallback.interval
+            ? [fallback.interval]
+            : [];
+      const strategies =
+        meta && meta.strategies.length
+          ? meta.strategies
+          : fallback.strategy
+            ? [fallback.strategy]
+            : [];
+
+      symbols.forEach((symbol) => symbolSet.add(symbol));
+      intervals.forEach((interval) => intervalSet.add(String(interval)));
+      strategies.forEach((strategy) => strategySet.add(strategy));
     });
-  }, [filesMeta]);
+
+    return {
+      symbols: Array.from(symbolSet).sort(),
+      intervals: Array.from(intervalSet).sort((a, b) => Number(a) - Number(b)),
+      strategies: Array.from(strategySet).sort(),
+    };
+  }, [availableFiles, fileMetaMap, deriveFileMeta]);
+
+  // Keep selection defaults aligned with ingest metadata (all files + all filters active).
+  useEffect(() => {
+    if (!availableFiles.length) return;
+    setActiveSelection((prev) => {
+      const labels =
+        filesMeta.length > 0 ? Object.fromEntries(filesMeta.map((f) => [f.file_id, f.filename])) : prev.fileLabels ?? {};
+      const prevLabels = prev.fileLabels ?? {};
+      const labelKeys = Object.keys(labels);
+      const labelChanged =
+        filesMeta.length > 0 &&
+        (Object.keys(prevLabels).length !== labelKeys.length || labelKeys.some((key) => prevLabels[key] !== labels[key]));
+
+      const nextFiles = availableFiles;
+      const nextSymbols = availableFilterValues.symbols;
+      const nextIntervals = availableFilterValues.intervals;
+      const nextStrategies = availableFilterValues.strategies;
+      const nextDirection = 'All';
+      const nextSpike = true;
+
+      const shouldUpdate =
+        labelChanged ||
+        !arraysEqual(prev.files ?? [], nextFiles) ||
+        !arraysEqual(prev.symbols ?? [], nextSymbols) ||
+        !arraysEqual(prev.intervals ?? [], nextIntervals) ||
+        !arraysEqual(prev.strategies ?? [], nextStrategies) ||
+        (prev.direction ?? 'All') !== nextDirection ||
+        prev.spike !== nextSpike;
+
+      if (!shouldUpdate) return prev;
+
+      return {
+        ...prev,
+        fileLabels: labels,
+        files: nextFiles,
+        symbols: nextSymbols,
+        intervals: nextIntervals,
+        strategies: nextStrategies,
+        direction: nextDirection,
+        spike: nextSpike,
+      };
+    });
+  }, [availableFiles, availableFilterValues, filesMeta]);
 
   const matchesFilters = useCallback(
     (fileId: string) => {
@@ -185,19 +258,36 @@ export default function HomePage() {
             ? [fallback.strategy]
             : [];
 
+      const requireSymbolFilters = availableFilterValues.symbols.length > 0;
+      const requireIntervalFilters = availableFilterValues.intervals.length > 0;
+      const requireStrategyFilters = availableFilterValues.strategies.length > 0;
+
       const symbolMatch =
-        !normalizedSymbols.length ||
-        (fileSymbols.length && fileSymbols.some((symbol) => normalizedSymbols.includes(symbol.toUpperCase())));
+        !requireSymbolFilters ||
+        (normalizedSymbols.length > 0 &&
+          fileSymbols.length > 0 &&
+          fileSymbols.some((symbol) => normalizedSymbols.includes(symbol.toUpperCase())));
       const intervalMatch =
-        !normalizedIntervals.length ||
-        (fileIntervals.length && fileIntervals.some((interval) => normalizedIntervals.includes(String(interval))));
+        !requireIntervalFilters ||
+        (normalizedIntervals.length > 0 &&
+          fileIntervals.length > 0 &&
+          fileIntervals.some((interval) => normalizedIntervals.includes(String(interval))));
       const strategyMatch =
-        !normalizedStrategies.length ||
-        (fileStrategies.length && fileStrategies.some((strategy) => normalizedStrategies.includes(strategy.toUpperCase())));
+        !requireStrategyFilters ||
+        (normalizedStrategies.length > 0 &&
+          fileStrategies.length > 0 &&
+          fileStrategies.some((strategy) => normalizedStrategies.includes(strategy.toUpperCase())));
 
       return symbolMatch && intervalMatch && strategyMatch;
     },
-    [activeSelection.symbols, activeSelection.intervals, activeSelection.strategies, deriveFileMeta, fileMetaMap],
+    [
+      activeSelection.symbols,
+      activeSelection.intervals,
+      activeSelection.strategies,
+      deriveFileMeta,
+      fileMetaMap,
+      availableFilterValues,
+    ],
   );
 
   const filteredFileIds = useMemo(() => {
@@ -207,39 +297,52 @@ export default function HomePage() {
 
   const filteredFileSet = useMemo(() => new Set(filteredFileIds), [filteredFileIds]);
 
-  const selectionForFetch = useMemo(() => ({ ...activeSelection, files: filteredFileIds }), [activeSelection, filteredFileIds]);
+  const selectionForFetch = useMemo(
+    () => normalizeSelection({ ...activeSelection, files: filteredFileIds }),
+    [activeSelection, filteredFileIds],
+  );
+
+  const selectionKey = useMemo(() => JSON.stringify(selectionForFetch), [selectionForFetch]);
 
   const equityQuery = useQuery({
-    queryKey: ['equity', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryKey: ['equity', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'equity', includeDownsample),
+    staleTime: STALE_TIME,
   });
   const equityPctQuery = useQuery({
-    queryKey: ['equityPercent', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryKey: ['equityPercent', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'equityPercent', includeDownsample),
+    staleTime: STALE_TIME,
   });
   const drawdownQuery = useQuery({
-    queryKey: ['drawdown', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryKey: ['drawdown', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'drawdown', includeDownsample),
+    staleTime: STALE_TIME,
   });
   const intradayDdQuery = useQuery({
-    queryKey: ['intradayDrawdown', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryKey: ['intradayDrawdown', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'intradayDrawdown', includeDownsample),
+    staleTime: STALE_TIME,
   });
   const netposQuery = useQuery({
-    queryKey: ['netpos', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryKey: ['netpos', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'netpos', includeDownsample),
+    staleTime: STALE_TIME,
   });
   const marginQuery = useQuery({
-    queryKey: ['margin', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryKey: ['margin', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'margin', includeDownsample),
+    staleTime: STALE_TIME,
   });
   const histogramQuery = useQuery({
-    queryKey: ['histogram', selectionForFetch.name, filteredFileIds.join(',')],
+    queryKey: ['histogram', selectionKey],
     queryFn: () => fetchHistogram(selectionForFetch),
+    staleTime: STALE_TIME,
   });
   const metricsQuery = useQuery({
-    queryKey: ['metrics', selectionForFetch.name, filteredFileIds.join(',')],
+    queryKey: ['metrics', selectionKey],
     queryFn: () => fetchMetrics(selectionForFetch),
+    staleTime: STALE_TIME,
   });
 
   useEffect(() => {
@@ -428,21 +531,24 @@ export default function HomePage() {
   }, [histogramData]);
 
   const correlationQuery = useQuery({
-    queryKey: ['correlations', selectionForFetch.name, filteredFileIds.join(','), corrMode],
+    queryKey: ['correlations', selectionKey, corrMode],
     queryFn: () => fetchCorrelations(selectionForFetch, corrMode),
     initialData: mockCorrelations(selectionForFetch, corrMode),
+    staleTime: STALE_TIME,
   });
 
   const optimizerQuery = useQuery({
-    queryKey: ['optimizer', selectionForFetch.name, filteredFileIds.join(',')],
+    queryKey: ['optimizer', selectionKey],
     queryFn: () => fetchOptimizer(selectionForFetch),
     initialData: mockOptimizer(selectionForFetch),
+    staleTime: STALE_TIME,
   });
 
   const ctaQuery = useQuery({
-    queryKey: ['cta', selectionForFetch.name, filteredFileIds.join(',')],
+    queryKey: ['cta', selectionKey],
     queryFn: () => fetchCta(selectionForFetch),
     initialData: mockCta(selectionForFetch),
+    staleTime: STALE_TIME,
   });
 
   const metricsSummary = useMemo(() => {

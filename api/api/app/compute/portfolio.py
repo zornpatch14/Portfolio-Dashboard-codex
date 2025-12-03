@@ -7,6 +7,7 @@ from typing import Iterable, Optional
 import polars as pl
 
 from api.app.compute.caches import PerFileCache, SeriesBundle
+from api.app.data.loader import LoadedTrades
 from api.app.compute.downsampling import DownsampleResult, downsample_timeseries
 from api.app.ingest import TradeFileMetadata
 
@@ -47,6 +48,7 @@ class PortfolioAggregator:
         margin_overrides: Optional[dict[str, float]] = None,
         direction: Optional[str] = None,
         include_spikes: bool = False,
+        loaded_trades: Optional[dict[str, LoadedTrades]] = None,
     ) -> PortfolioView:
         files = list(files)
         if not files:
@@ -67,6 +69,7 @@ class PortfolioAggregator:
             margin_overrides=margin_overrides,
             direction=direction,
             include_spikes=include_spikes,
+            loaded_trades=loaded_trades,
         )
 
         daily_frames = [c.bundle.daily_returns for c in contributors]
@@ -114,27 +117,35 @@ class PortfolioAggregator:
         margin_overrides: Optional[dict[str, float]] = None,
         direction: Optional[str] = None,
         include_spikes: bool = False,
+        loaded_trades: Optional[dict[str, LoadedTrades]] = None,
     ) -> list[ContributorSeries]:
         meta_map = {m.file_id: m for m in metas} if metas else {}
         contract_multipliers = contract_multipliers or {}
         margin_overrides = margin_overrides or {}
 
-        def overrides_for(path: Path) -> tuple[float | None, float | None, TradeFileMetadata | None]:
+        def overrides_for(path: Path) -> tuple[float | None, float | None, TradeFileMetadata | None, str]:
             file_id = path.stem
             meta = meta_map.get(file_id)
+            if meta and meta.file_id != file_id:
+                file_id = meta.file_id
             symbol = (meta.symbol or "").upper() if meta and meta.symbol else None
             cmult = contract_multipliers.get(symbol, None)
             margin = margin_overrides.get(symbol, None)
-            return cmult, margin, meta
+            return cmult, margin, meta, file_id
 
         contributors: list[ContributorSeries] = []
         for path in files:
-            cmult, marg, meta = overrides_for(path)
-            equity = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=marg, direction=direction)
-            daily = self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg, direction=direction)
-            netpos = self.cache.net_position(path, contract_multiplier=cmult, margin_override=marg, direction=direction)
-            margin_usage = self.cache.margin_usage(path, contract_multiplier=cmult, margin_override=marg, direction=direction)
-            spikes_df = self.cache.spike_overlay(path, contract_multiplier=cmult, direction=direction) if include_spikes else _EMPTY_SPIKES
+            cmult, marg, meta, file_id = overrides_for(path)
+            loaded = loaded_trades.get(file_id) if loaded_trades else None
+            equity = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=file_id)
+            daily = self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=file_id)
+            netpos = self.cache.net_position(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=file_id)
+            margin_usage = self.cache.margin_usage(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=file_id)
+            spikes_df = (
+                self.cache.spike_overlay(path, contract_multiplier=cmult, direction=direction, loaded=loaded, file_id=file_id)
+                if include_spikes
+                else _EMPTY_SPIKES
+            )
             label = (meta.original_filename or meta.filename) if meta else path.name
             contributors.append(
                 ContributorSeries(

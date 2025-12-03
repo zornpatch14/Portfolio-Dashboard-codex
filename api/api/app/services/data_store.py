@@ -16,6 +16,7 @@ from api.app.compute.caches import PerFileCache
 from api.app.compute.downsampling import downsample_timeseries
 from api.app.compute.portfolio import ContributorSeries, PortfolioAggregator, PortfolioView
 from api.app.constants import get_contract_spec
+from api.app.data.loader import LoadedTrades
 from api.app.ingest import IngestService, TradeFileMetadata
 from api.app.dependencies import selection_hash
 from api.app.services.cache import build_selection_key, get_cache_backend
@@ -86,9 +87,9 @@ class DataStore:
         self._backend = get_cache_backend()
         try:
             ttl_env = os.getenv("PORTFOLIO_CACHE_TTL_SECONDS")
-            self._ttl_seconds = int(ttl_env) if ttl_env else 900
+            self._ttl_seconds = int(ttl_env) if ttl_env else 21_600  # default 6 hours
         except ValueError:
-            self._ttl_seconds = 900
+            self._ttl_seconds = 21_600
 
     # ---------------- ingest & metadata ----------------
     def ingest(self, files: Iterable[UploadFile]) -> FileUploadResponse:
@@ -171,13 +172,28 @@ class DataStore:
         start_date = selection.start_date
         end_date = selection.end_date
 
+        symbol_dimension_active = any(m.symbol for m in filtered)
+        interval_dimension_active = any(m.interval is not None for m in filtered)
+        strategy_dimension_active = any(m.strategy for m in filtered)
+
+        if symbol_dimension_active and not symbols:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No files match selection filters")
+        if interval_dimension_active and not intervals:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No files match selection filters")
+        if strategy_dimension_active and not strategies:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No files match selection filters")
+
         def keep(meta: TradeFileMetadata) -> bool:
-            if symbols and meta.symbol and meta.symbol not in symbols:
-                return False
-            if intervals and meta.interval is not None and str(meta.interval) not in intervals:
-                return False
-            if strategies and meta.strategy and meta.strategy not in strategies:
-                return False
+            if symbol_dimension_active:
+                if not meta.symbol or meta.symbol not in symbols:
+                    return False
+            if interval_dimension_active:
+                interval_val = str(meta.interval) if meta.interval is not None else None
+                if not interval_val or interval_val not in intervals:
+                    return False
+            if strategy_dimension_active:
+                if not meta.strategy or meta.strategy not in strategies:
+                    return False
             if start_date and meta.date_max and meta.date_max.date() < start_date:
                 return False
             if end_date and meta.date_min and meta.date_min.date() > end_date:
@@ -189,6 +205,13 @@ class DataStore:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No files match selection filters")
 
         return filtered
+
+    def _load_trades_map(self, metas: list[TradeFileMetadata]) -> dict[str, LoadedTrades]:
+        loaded: dict[str, LoadedTrades] = {}
+        for meta in metas:
+            path = Path(meta.trades_path)
+            loaded[meta.file_id] = self.cache.load_trades(path)
+        return loaded
 
     def _to_points(self, rows, ts_key: str, value_key: str) -> list[SeriesPoint]:
         points: list[SeriesPoint] = []
@@ -202,12 +225,18 @@ class DataStore:
             points.append(SeriesPoint(timestamp=ts_val, value=float(row[value_key])))
         return points
 
-    def _view_for_selection(self, selection: Selection) -> PortfolioView:
+    def _view_for_selection(
+        self,
+        selection: Selection,
+        metas: list[TradeFileMetadata] | None = None,
+        loaded_trades: dict[str, LoadedTrades] | None = None,
+    ) -> PortfolioView:
         key = selection_hash(selection)
         cache_key = build_selection_key(key, selection.data_version, "portfolio")
 
-        metas = self._metas_for_selection(selection)
+        metas = metas or self._metas_for_selection(selection)
         paths = [Path(m.trades_path) for m in metas]
+        trades_map = loaded_trades or self._load_trades_map(metas)
         cached_view = self._load_portfolio_from_cache(cache_key)
         if cached_view:
             view = cached_view
@@ -219,6 +248,7 @@ class DataStore:
                 margin_overrides=selection.margin_overrides,
                 direction=selection.direction,
                 include_spikes=selection.spike_flag,
+                loaded_trades=trades_map,
             )
             view = PortfolioView(
                 equity=built.equity.clone(),
@@ -231,7 +261,7 @@ class DataStore:
             self._portfolio_cache[key] = view
             self._persist_portfolio_to_cache(cache_key, view)
 
-        self._hydrate_contributors(view, metas, selection, paths)
+        self._hydrate_contributors(view, metas, selection, paths, trades_map)
         return self._filter_view_by_date(view, selection)
 
     def _persist_portfolio_to_cache(self, cache_key: str, view: PortfolioView) -> None:
@@ -341,6 +371,7 @@ class DataStore:
         metas: list[TradeFileMetadata],
         selection: Selection,
         paths: list[Path] | None = None,
+        loaded_trades: dict[str, LoadedTrades] | None = None,
     ) -> None:
         if view.contributors:
             return
@@ -352,6 +383,7 @@ class DataStore:
             margin_overrides=selection.margin_overrides,
             direction=selection.direction,
             include_spikes=selection.spike_flag,
+            loaded_trades=loaded_trades,
         )
         view.contributors = contributors
 
@@ -505,6 +537,7 @@ class DataStore:
     def metrics(self, selection: Selection) -> MetricsResponse:
         metas = self._metas_for_selection(selection)
         paths = [Path(m.trades_path) for m in metas]
+        loaded_trades = self._load_trades_map(metas)
         rows: list[MetricsRow] = []
         direction = selection.direction
 
@@ -527,10 +560,14 @@ class DataStore:
             symbol = (meta.symbol or "").upper()
             cmult = selection.contract_multipliers.get(symbol)
             marg = selection.margin_overrides.get(symbol)
+            loaded = loaded_trades.get(meta.file_id)
+            if loaded is None:
+                loaded = self.cache.load_trades(path)
+                loaded_trades[meta.file_id] = loaded
 
-            equity = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=marg, direction=direction)
-            trades_df = _filter_direction(self.cache.load_trades(path).trades)
-            daily = self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg, direction=direction)
+            equity = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=meta.file_id)
+            trades_df = _filter_direction(loaded.trades)
+            daily = self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=meta.file_id)
 
             net_profit = float(equity["equity"][-1] - self.cache.starting_equity) if len(equity) else 0.0
             trades = len(trades_df)
@@ -551,12 +588,12 @@ class DataStore:
             add("avg_daily_return", avg_daily)
 
         # Portfolio metrics
-        view = self._view_for_selection(selection)
+        view = self._view_for_selection(selection, metas=metas, loaded_trades=loaded_trades)
         if len(view.equity):
             portfolio_net = float(view.equity["equity"][-1] - self.cache.starting_equity)
             port_dd = _max_drawdown(view.equity)
             port_daily = float(view.daily_returns["daily_return"].mean()) if len(view.daily_returns) else 0.0
-            dir_trades = sum(len(_filter_direction(self.cache.load_trades(p).trades)) for p in paths)
+            dir_trades = sum(len(_filter_direction(loaded_trades[p.stem].trades)) for p in paths)
             def addp(metric: str, value: float) -> None:
                 rows.append(MetricsRow(file_id="portfolio", metric=metric, value=value, level="portfolio"))
 
