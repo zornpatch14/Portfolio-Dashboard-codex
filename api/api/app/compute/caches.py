@@ -8,7 +8,7 @@ from typing import Callable, Iterable
 
 import polars as pl
 
-from api.app.constants import DEFAULT_MARGIN_PER_CONTRACT
+from api.app.constants import DEFAULT_MARGIN_PER_CONTRACT, DEFAULT_ACCOUNT_EQUITY
 from api.app.data.loader import LoadedTrades, load_trade_file
 
 
