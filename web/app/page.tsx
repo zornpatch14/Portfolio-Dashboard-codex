@@ -1764,6 +1764,7 @@ export default function HomePage() {
           <input
             className="input"
             type="number"
+            step={1000}
             value={accountEquity}
             onChange={(event) => {
               const next = Number(event.target.value);
