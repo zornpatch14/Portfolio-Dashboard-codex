@@ -43,6 +43,7 @@ const tabs = [
 ] as const;
 const NO_DATA_MESSAGE = 'No data matches your selection.';
 const GENERIC_ERROR_MESSAGE = 'Failed to load data.';
+const STALE_TIME = Infinity;
 
 type FilterValueMap = {
   symbols: string[];
@@ -306,34 +307,42 @@ export default function HomePage() {
   const equityQuery = useQuery({
     queryKey: ['equity', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'equity', includeDownsample),
+    staleTime: STALE_TIME,
   });
   const equityPctQuery = useQuery({
     queryKey: ['equityPercent', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'equityPercent', includeDownsample),
+    staleTime: STALE_TIME,
   });
   const drawdownQuery = useQuery({
     queryKey: ['drawdown', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'drawdown', includeDownsample),
+    staleTime: STALE_TIME,
   });
   const intradayDdQuery = useQuery({
     queryKey: ['intradayDrawdown', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'intradayDrawdown', includeDownsample),
+    staleTime: STALE_TIME,
   });
   const netposQuery = useQuery({
     queryKey: ['netpos', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'netpos', includeDownsample),
+    staleTime: STALE_TIME,
   });
   const marginQuery = useQuery({
     queryKey: ['margin', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'margin', includeDownsample),
+    staleTime: STALE_TIME,
   });
   const histogramQuery = useQuery({
     queryKey: ['histogram', selectionKey],
     queryFn: () => fetchHistogram(selectionForFetch),
+    staleTime: STALE_TIME,
   });
   const metricsQuery = useQuery({
     queryKey: ['metrics', selectionKey],
     queryFn: () => fetchMetrics(selectionForFetch),
+    staleTime: STALE_TIME,
   });
 
   useEffect(() => {
@@ -525,18 +534,21 @@ export default function HomePage() {
     queryKey: ['correlations', selectionKey, corrMode],
     queryFn: () => fetchCorrelations(selectionForFetch, corrMode),
     initialData: mockCorrelations(selectionForFetch, corrMode),
+    staleTime: STALE_TIME,
   });
 
   const optimizerQuery = useQuery({
     queryKey: ['optimizer', selectionKey],
     queryFn: () => fetchOptimizer(selectionForFetch),
     initialData: mockOptimizer(selectionForFetch),
+    staleTime: STALE_TIME,
   });
 
   const ctaQuery = useQuery({
     queryKey: ['cta', selectionKey],
     queryFn: () => fetchCta(selectionForFetch),
     initialData: mockCta(selectionForFetch),
+    staleTime: STALE_TIME,
   });
 
   const metricsSummary = useMemo(() => {
