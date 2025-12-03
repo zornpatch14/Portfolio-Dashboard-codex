@@ -23,7 +23,7 @@ import {
   mockCta,
   SeriesKind,
 } from '../lib/api';
-import { loadSampleSelections, Selection } from '../lib/selections';
+import { loadSampleSelections, normalizeSelection, Selection } from '../lib/selections';
 
 const selections = loadSampleSelections();
 const SELECTION_STORAGE_KEY = 'portfolio-selection-state';
@@ -296,38 +296,43 @@ export default function HomePage() {
 
   const filteredFileSet = useMemo(() => new Set(filteredFileIds), [filteredFileIds]);
 
-  const selectionForFetch = useMemo(() => ({ ...activeSelection, files: filteredFileIds }), [activeSelection, filteredFileIds]);
+  const selectionForFetch = useMemo(
+    () => normalizeSelection({ ...activeSelection, files: filteredFileIds }),
+    [activeSelection, filteredFileIds],
+  );
+
+  const selectionKey = useMemo(() => JSON.stringify(selectionForFetch), [selectionForFetch]);
 
   const equityQuery = useQuery({
-    queryKey: ['equity', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryKey: ['equity', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'equity', includeDownsample),
   });
   const equityPctQuery = useQuery({
-    queryKey: ['equityPercent', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryKey: ['equityPercent', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'equityPercent', includeDownsample),
   });
   const drawdownQuery = useQuery({
-    queryKey: ['drawdown', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryKey: ['drawdown', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'drawdown', includeDownsample),
   });
   const intradayDdQuery = useQuery({
-    queryKey: ['intradayDrawdown', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryKey: ['intradayDrawdown', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'intradayDrawdown', includeDownsample),
   });
   const netposQuery = useQuery({
-    queryKey: ['netpos', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryKey: ['netpos', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'netpos', includeDownsample),
   });
   const marginQuery = useQuery({
-    queryKey: ['margin', selectionForFetch.name, filteredFileIds.join(','), includeDownsample],
+    queryKey: ['margin', selectionKey, includeDownsample],
     queryFn: () => fetchSeries(selectionForFetch, 'margin', includeDownsample),
   });
   const histogramQuery = useQuery({
-    queryKey: ['histogram', selectionForFetch.name, filteredFileIds.join(',')],
+    queryKey: ['histogram', selectionKey],
     queryFn: () => fetchHistogram(selectionForFetch),
   });
   const metricsQuery = useQuery({
-    queryKey: ['metrics', selectionForFetch.name, filteredFileIds.join(',')],
+    queryKey: ['metrics', selectionKey],
     queryFn: () => fetchMetrics(selectionForFetch),
   });
 
@@ -517,19 +522,19 @@ export default function HomePage() {
   }, [histogramData]);
 
   const correlationQuery = useQuery({
-    queryKey: ['correlations', selectionForFetch.name, filteredFileIds.join(','), corrMode],
+    queryKey: ['correlations', selectionKey, corrMode],
     queryFn: () => fetchCorrelations(selectionForFetch, corrMode),
     initialData: mockCorrelations(selectionForFetch, corrMode),
   });
 
   const optimizerQuery = useQuery({
-    queryKey: ['optimizer', selectionForFetch.name, filteredFileIds.join(',')],
+    queryKey: ['optimizer', selectionKey],
     queryFn: () => fetchOptimizer(selectionForFetch),
     initialData: mockOptimizer(selectionForFetch),
   });
 
   const ctaQuery = useQuery({
-    queryKey: ['cta', selectionForFetch.name, filteredFileIds.join(',')],
+    queryKey: ['cta', selectionKey],
     queryFn: () => fetchCta(selectionForFetch),
     initialData: mockCta(selectionForFetch),
   });
