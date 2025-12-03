@@ -86,9 +86,9 @@ class DataStore:
         self._backend = get_cache_backend()
         try:
             ttl_env = os.getenv("PORTFOLIO_CACHE_TTL_SECONDS")
-            self._ttl_seconds = int(ttl_env) if ttl_env else 900
+            self._ttl_seconds = int(ttl_env) if ttl_env else 21_600  # default 6 hours
         except ValueError:
-            self._ttl_seconds = 900
+            self._ttl_seconds = 21_600
 
     # ---------------- ingest & metadata ----------------
     def ingest(self, files: Iterable[UploadFile]) -> FileUploadResponse:
