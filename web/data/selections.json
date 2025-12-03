@@ -1,7 +1,9 @@
 [
   {
     "name": "mnq15_single",
-    "files": ["tradeslist_MNQ_15_5Xnew.xlsx"],
+    "files": [
+      "tradeslist_MNQ_15_5Xnew.xlsx"
+    ],
     "symbols": [],
     "intervals": [],
     "strategies": [],
@@ -10,11 +12,15 @@
     "end": null,
     "contracts": {},
     "margins": {},
-    "spike": false
+    "spike": false,
+    "contractMultipliers": {},
+    "marginOverrides": {}
   },
   {
     "name": "mes15_single",
-    "files": ["tradeslist_MES_15_4Xnew.xlsx"],
+    "files": [
+      "tradeslist_MES_15_4Xnew.xlsx"
+    ],
     "symbols": [],
     "intervals": [],
     "strategies": [],
@@ -23,11 +29,15 @@
     "end": null,
     "contracts": {},
     "margins": {},
-    "spike": false
+    "spike": false,
+    "contractMultipliers": {},
+    "marginOverrides": {}
   },
   {
     "name": "mnq60_single",
-    "files": ["tradeslist_MNQ_60_17Xnew.xlsx"],
+    "files": [
+      "tradeslist_MNQ_60_17Xnew.xlsx"
+    ],
     "symbols": [],
     "intervals": [],
     "strategies": [],
@@ -36,11 +46,15 @@
     "end": null,
     "contracts": {},
     "margins": {},
-    "spike": false
+    "spike": false,
+    "contractMultipliers": {},
+    "marginOverrides": {}
   },
   {
     "name": "ng60_single",
-    "files": ["tradeslist_NG_60_91Xnew.xlsx"],
+    "files": [
+      "tradeslist_NG_60_91Xnew.xlsx"
+    ],
     "symbols": [],
     "intervals": [],
     "strategies": [],
@@ -49,11 +63,16 @@
     "end": null,
     "contracts": {},
     "margins": {},
-    "spike": false
+    "spike": false,
+    "contractMultipliers": {},
+    "marginOverrides": {}
   },
   {
     "name": "cd_jy_combo",
-    "files": ["tradeslist_CD_30_4Xnew.xlsx", "tradeslist_JY_30_92Xnew.xlsx"],
+    "files": [
+      "tradeslist_CD_30_4Xnew.xlsx",
+      "tradeslist_JY_30_92Xnew.xlsx"
+    ],
     "symbols": [],
     "intervals": [],
     "strategies": [],
@@ -62,11 +81,16 @@
     "end": null,
     "contracts": {},
     "margins": {},
-    "spike": false
+    "spike": false,
+    "contractMultipliers": {},
+    "marginOverrides": {}
   },
   {
     "name": "mnq_mes_pair",
-    "files": ["tradeslist_MNQ_15_5Xnew.xlsx", "tradeslist_MES_15_4Xnew.xlsx"],
+    "files": [
+      "tradeslist_MNQ_15_5Xnew.xlsx",
+      "tradeslist_MES_15_4Xnew.xlsx"
+    ],
     "symbols": [],
     "intervals": [],
     "strategies": [],
@@ -75,7 +99,9 @@
     "end": null,
     "contracts": {},
     "margins": {},
-    "spike": false
+    "spike": false,
+    "contractMultipliers": {},
+    "marginOverrides": {}
   },
   {
     "name": "all_files_combo",
@@ -95,6 +121,8 @@
     "end": null,
     "contracts": {},
     "margins": {},
-    "spike": false
+    "spike": false,
+    "contractMultipliers": {},
+    "marginOverrides": {}
   }
 ]

@@ -36,6 +36,7 @@ web/node_modules/
 # --- Local data/cache produced by the app ---
 storage/
 data/
+!web/data/
 *.parquet
 metadata/
 
