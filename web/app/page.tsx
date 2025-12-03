@@ -1577,7 +1577,7 @@ export default function HomePage() {
                   <input
                     type="number"
                     min={0}
-                    step={0.25}
+                    step={1}
                     className="input"
                     style={{ opacity: filteredOut ? 0.5 : 1 }}
                     value={contractValue}
