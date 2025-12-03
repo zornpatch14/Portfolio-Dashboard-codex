@@ -8,7 +8,7 @@ from typing import Callable, Iterable
 
 import polars as pl
 
-from api.app.constants import DEFAULT_MARGIN_PER_CONTRACT
+from api.app.constants import DEFAULT_MARGIN_PER_CONTRACT, DEFAULT_ACCOUNT_EQUITY
 from api.app.data.loader import LoadedTrades, load_trade_file
 
 
@@ -27,7 +27,7 @@ class PerFileCache:
     def __init__(
         self,
         storage_dir: Path | str | None = None,
-        starting_equity: float = 100_000.0,
+        starting_equity: float = DEFAULT_ACCOUNT_EQUITY,
         margin_per_contract: float | None = None,
         contract_multiplier: float = 1.0,
         data_version: str | None = None,
@@ -250,6 +250,17 @@ class PerFileCache:
         return trades.with_columns(*updates)
 
     @staticmethod
+    def _scale_mtm_profits(mtm_df: pl.DataFrame, multiplier: float) -> pl.DataFrame:
+        """Apply the contract multiplier to MTM net profits before using them downstream."""
+
+        if multiplier == 1 or multiplier == 1.0 or mtm_df.is_empty():
+            return mtm_df
+        if "mtm_net_profit" not in mtm_df.columns:
+            return mtm_df
+        factor = float(multiplier)
+        return mtm_df.with_columns((pl.col("mtm_net_profit") * factor).alias("mtm_net_profit"))
+
+    @staticmethod
     def _filter_by_direction(trades: pl.DataFrame, direction: str | None) -> pl.DataFrame:
         """Filter trades to the requested direction ('long' or 'short')."""
 
@@ -275,6 +286,7 @@ class PerFileCache:
         # Try MTM-driven equity first
         mtm_df = self.load_mtm(loaded.path, loaded.file_id)
         if not mtm_df.is_empty():
+            mtm_df = self._scale_mtm_profits(mtm_df, cmult)
             # Stepwise equity: open at session start, close at session end with MTM P&L applied.
             mtm_df = mtm_df.sort("mtm_date")
             equity_points = []
@@ -337,6 +349,7 @@ class PerFileCache:
 
         # Use MTM sessions when available.
         if not mtm_df.is_empty():
+            mtm_df = self._scale_mtm_profits(mtm_df, cmult)
             mtm_df = mtm_df.sort("mtm_date")
             last_session_end = mtm_df["mtm_session_end"].max() if "mtm_session_end" in mtm_df.columns else None
             _, intervals = self._netpos_intervals(

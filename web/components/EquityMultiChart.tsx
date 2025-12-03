@@ -37,8 +37,7 @@ export function EquityMultiChart({ title, series, description, height = 380 }: P
       },
       grid: { left: 50, right: 20, top: 50, bottom: 40 },
       xAxis: {
-        type: 'category',
-        data: series[0]?.points.map((p) => p.timestamp) ?? [],
+        type: 'time',
         axisLine: { lineStyle: { color: '#334b76' } },
         axisLabel: { color: '#a5b2c9' },
       },
@@ -51,7 +50,7 @@ export function EquityMultiChart({ title, series, description, height = 380 }: P
       series: series.map((line, idx) => ({
         name: line.name,
         type: 'line',
-        data: line.points.map((p) => p.value),
+        data: line.points.map((p) => [p.timestamp, p.value]),
         smooth: true,
         showSymbol: false,
         lineStyle: { width: 2, color: palette[idx % palette.length] },
