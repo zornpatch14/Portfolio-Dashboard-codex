@@ -194,7 +194,11 @@ class PerFileCache:
         contract_multiplier: float | None = None,
         margin_override: float | None = None,
         direction: str | None = None,
-        loaded: LoadedTrades | None = loaded
+        loaded: LoadedTrades | None = None,
+        file_id: str | None = None,
+    ) -> pl.DataFrame:
+        """Load cached artifact or build and persist it for the given file."""
+
         file_identifier = file_id or (loaded.file_id if loaded else None)
         if file_identifier is None:
             loaded = self.load_trades(path)
@@ -202,7 +206,10 @@ class PerFileCache:
 
         target = self._artifact_path(file_identifier, artifact, contract_multiplier, margin_override, direction)
         if target.exists():
-            return pl.read_parquet(target)
+            try:
+                return pl.read_parquet(target)
+            except Exception:
+                target.unlink(missing_ok=True)
 
         if loaded is None:
             loaded = self.load_trades(path)
