@@ -28,7 +28,19 @@ import { loadSampleSelections, normalizeSelection, Selection } from '../lib/sele
 const selections = loadSampleSelections();
 const SELECTION_STORAGE_KEY = 'portfolio-selection-state';
 const UPLOAD_INPUT_ID = 'upload-input';
-const tabs = [
+const MARGIN_DEFAULTS: Record<string, number> = {
+  MNQ: 3250,
+  MES: 2300,
+  MYM: 1500,
+  M2K: 1000,
+  CD: 1100,
+  JY: 3100,
+  NE1: 1500,
+  NG: 3800,
+};
+const FALLBACK_MARGIN = 10000;
+
+const tabs = [
   { key: 'load-trade-lists', label: 'Load Trade Lists' },
   { key: 'summary', label: 'Summary' },
   { key: 'equity-curves', label: 'Equity Curves' },
@@ -131,7 +143,7 @@ export default function HomePage() {
     [filesMeta],
   );
 
-  const deriveFileMeta = useMemo(() => {
+  const deriveFileMeta = useMemo(() => {
     return (fileId: string) => {
       const label = fileLabelMap[fileId] || fileId;
       const base = label.split('/').pop() || label;
@@ -144,11 +156,31 @@ export default function HomePage() {
     };
   }, [fileLabelMap]);
 
-  const fileMetaMap = useMemo(() => {
-    const map = new Map<string, (typeof filesMeta)[number]>();
-    filesMeta.forEach((file) => map.set(file.file_id, file));
-    return map;
-  }, [filesMeta]);
+  const fileMetaMap = useMemo(() => {
+    const map = new Map<string, (typeof filesMeta)[number]>();
+    filesMeta.forEach((file) => map.set(file.file_id, file));
+    return map;
+  }, [filesMeta]);
+
+  const marginDefaultsByFile = useMemo(() => {
+    const map: Record<string, number> = {};
+    availableFiles.forEach((fileId) => {
+      const meta = fileMetaMap.get(fileId);
+      const symbol =
+        (meta && meta.symbols.length
+          ? meta.symbols[0]
+          : deriveFileMeta(fileId).symbol || '').toUpperCase();
+      const metaMargin = meta?.margin_per_contract;
+      if (typeof metaMargin === 'number' && metaMargin > 0) {
+        map[fileId] = metaMargin;
+      } else if (symbol && MARGIN_DEFAULTS[symbol]) {
+        map[fileId] = MARGIN_DEFAULTS[symbol];
+      } else {
+        map[fileId] = FALLBACK_MARGIN;
+      }
+    });
+    return map;
+  }, [availableFiles, fileMetaMap, deriveFileMeta]);
 
   const availableFilterValues = useMemo<FilterValueMap>(() => {
     const symbolSet = new Set<string>();
@@ -190,9 +222,9 @@ export default function HomePage() {
   }, [availableFiles, fileMetaMap, deriveFileMeta]);
 
   // Keep selection defaults aligned with ingest metadata (all files + all filters active).
-  useEffect(() => {
-    if (!availableFiles.length) return;
-    setActiveSelection((prev) => {
+  useEffect(() => {
+    if (!availableFiles.length) return;
+    setActiveSelection((prev) => {
       const labels =
         filesMeta.length > 0 ? Object.fromEntries(filesMeta.map((f) => [f.file_id, f.filename])) : prev.fileLabels ?? {};
       const prevLabels = prev.fileLabels ?? {};
@@ -261,7 +293,38 @@ export default function HomePage() {
         contractMultipliers: next,
       };
     });
-  }, [availableFiles]);
+  }, [availableFiles]);
+
+  useEffect(() => {
+    if (!availableFiles.length) return;
+    setActiveSelection((prev) => {
+      const existing = prev.marginOverrides ?? prev.margins ?? {};
+      const allowed = new Set(availableFiles);
+      let changed = !prev.marginOverrides;
+      const next: Record<string, number> = {};
+      availableFiles.forEach((fileId) => {
+        if (Object.prototype.hasOwnProperty.call(existing, fileId)) {
+          next[fileId] = existing[fileId];
+        } else {
+          next[fileId] = marginDefaultsByFile[fileId] ?? FALLBACK_MARGIN;
+          changed = true;
+        }
+      });
+      Object.keys(existing).forEach((key) => {
+        if (!allowed.has(key)) {
+          changed = true;
+        }
+      });
+      if (!changed) {
+        return prev;
+      }
+      return {
+        ...prev,
+        margins: next,
+        marginOverrides: next,
+      };
+    });
+  }, [availableFiles, marginDefaultsByFile]);
 
   const matchesFilters = useCallback(
     (fileId: string) => {
@@ -1569,9 +1632,23 @@ export default function HomePage() {
             >
               Use default contracts (1)
             </button>
-            <button type="button" className="button" style={{ width: '100%' }} disabled>
-              Use default margin (placeholder)
-            </button>
+            <button
+              type="button"
+              className="button"
+              style={{ width: '100%' }}
+              onClick={() => {
+                const defaults = Object.fromEntries(
+                  availableFiles.map((file) => [file, marginDefaultsByFile[file] ?? FALLBACK_MARGIN]),
+                ) as Record<string, number>;
+                setActiveSelection((prev) => ({
+                  ...prev,
+                  margins: defaults,
+                  marginOverrides: defaults,
+                }));
+              }}
+            >
+              Use default margin
+            </button>
           </div>
           <div className="file-rows" style={{ marginTop: 10, display: 'grid', gap: 10 }}>
             {availableFiles.map((fileId) => {
@@ -1579,8 +1656,10 @@ export default function HomePage() {
               const active = activeSelection.files.includes(fileId);
               const contractValue =
                 (activeSelection.contractMultipliers ?? activeSelection.contracts)?.[fileId] ?? 1;
-              const marginValue =
-                (activeSelection.marginOverrides ?? activeSelection.margins)?.[fileId] ?? '';
+              const marginValue =
+                (activeSelection.marginOverrides ?? activeSelection.margins)?.[fileId] ??
+                marginDefaultsByFile[fileId] ??
+                '';
               const filteredIn = filteredFileSet.has(fileId);
               const filteredOut = active && !filteredIn;
               return (
