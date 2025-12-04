@@ -49,17 +49,7 @@ def _portfolio_frame(series_name: str, view) -> tuple:
         return view.equity, "equity", "equity"
 
     if series_name in {"equity_percent", "equity-percent"}:
-        equity = view.equity
-        if equity.is_empty():
-            percent = pl.DataFrame({"timestamp": [], "percent_equity": []})
-        else:
-            first = float(equity["equity"][0])
-            if first == 0:
-                percent = pl.DataFrame({"timestamp": [], "percent_equity": []})
-            else:
-                percent_vals = ((equity["equity"] / first) - 1.0) * 100.0
-                percent = pl.DataFrame({"timestamp": equity["timestamp"], "percent_equity": percent_vals})
-        return percent, "percent_equity", "equity_percent"
+        return view.percent_equity, "percent_equity", "equity_percent"
 
     if series_name in {"drawdown", "intraday_drawdown"}:
         dd_values = _drawdown_from_equity(view.equity)
@@ -86,17 +76,7 @@ def _frame_from_contributor(series_name: str, contributor: ContributorSeries):
     if series_name == "equity":
         return bundle.equity, "equity"
     if series_name in {"equity_percent", "equity-percent"}:
-        equity = bundle.equity
-        if equity.is_empty():
-            percent = pl.DataFrame({"timestamp": [], "percent_equity": []})
-        else:
-            first = float(equity["equity"][0])
-            if first == 0:
-                percent = pl.DataFrame({"timestamp": [], "percent_equity": []})
-            else:
-                percent_vals = ((equity["equity"] / first) - 1.0) * 100.0
-                percent = pl.DataFrame({"timestamp": equity["timestamp"], "percent_equity": percent_vals})
-        return percent, "percent_equity"
+        return bundle.percent_equity, "percent_equity"
     if series_name in {"drawdown", "intraday_drawdown"}:
         equity = bundle.equity
         dd_values = _drawdown_from_equity(equity)
