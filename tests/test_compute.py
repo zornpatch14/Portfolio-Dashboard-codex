@@ -22,7 +22,7 @@ def test_per_file_caches_roundtrip(tmp_path: Path) -> None:
 
     bundle = cache.bundle(files[0])
     assert len(bundle.equity) > 0
-    assert len(bundle.percent_equity) > 0
+    assert len(bundle.daily_percent) > 0
     assert set(bundle.daily_returns.columns) == {"date", "pnl", "capital", "daily_return"}
 
     # ensure cache hit path works
@@ -37,7 +37,7 @@ def test_portfolio_aggregation(tmp_path: Path) -> None:
 
     view = aggregator.aggregate(files)
     assert len(view.daily_returns) > 0
-    assert len(view.percent_equity) > 0
+    assert len(view.daily_percent_portfolio) > 0
     assert len(view.net_position) > 0
     assert len(view.margin) == len(view.net_position)
 

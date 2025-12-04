@@ -12,20 +12,9 @@ from api.app.constants import DEFAULT_MARGIN_PER_CONTRACT, DEFAULT_ACCOUNT_EQUIT
 from api.app.data.loader import LoadedTrades, load_trade_file
 
 
-def percent_from_equity(equity: pl.DataFrame) -> pl.DataFrame:
-    if equity.is_empty():
-        return pl.DataFrame({"timestamp": [], "percent_equity": []})
-    first = float(equity["equity"][0])
-    if first == 0:
-        return pl.DataFrame({"timestamp": [], "percent_equity": []})
-    percent_vals = ((equity["equity"] / first) - 1.0) * 100.0
-    return pl.DataFrame({"timestamp": equity["timestamp"], "percent_equity": percent_vals})
-
-
 @dataclass
 class SeriesBundle:
     equity: pl.DataFrame
-    percent_equity: pl.DataFrame
     daily_returns: pl.DataFrame
     daily_percent: pl.DataFrame
     net_position: pl.DataFrame
@@ -82,37 +71,6 @@ class PerFileCache:
             path,
             "equity",
             lambda loaded: self._compute_equity(loaded, contract_multiplier, margin_override, direction),
-            contract_multiplier,
-            margin_override,
-            direction,
-            loaded=loaded,
-            file_id=file_id,
-        )
-
-    def percent_equity_curve(
-        self,
-        path: Path,
-        contract_multiplier: float | None = None,
-        margin_override: float | None = None,
-        direction: str | None = None,
-        loaded: LoadedTrades | None = None,
-        file_id: str | None = None,
-    ) -> pl.DataFrame:
-        def builder(inner_loaded: LoadedTrades) -> pl.DataFrame:
-            equity = self.equity_curve(
-                path,
-                contract_multiplier=contract_multiplier,
-                margin_override=margin_override,
-                direction=direction,
-                loaded=inner_loaded,
-                file_id=file_id,
-            )
-            return percent_from_equity(equity)
-
-        return self._get_or_build(
-            path,
-            "percent_equity",
-            builder,
             contract_multiplier,
             margin_override,
             direction,
@@ -244,12 +202,10 @@ class PerFileCache:
 
     def bundle(self, path: Path, loaded: LoadedTrades | None = None, file_id: str | None = None) -> SeriesBundle:
         equity = self.equity_curve(path, loaded=loaded, file_id=file_id)
-        percent_equity = self.percent_equity_curve(path, loaded=loaded, file_id=file_id)
         daily_returns = self.daily_returns(path, loaded=loaded, file_id=file_id)
         daily_percent = self.daily_percent_returns(path, loaded=loaded, file_id=file_id)
         return SeriesBundle(
             equity=equity,
-            percent_equity=percent_equity,
             daily_returns=daily_returns,
             daily_percent=daily_percent,
             net_position=self.net_position(path, loaded=loaded, file_id=file_id),

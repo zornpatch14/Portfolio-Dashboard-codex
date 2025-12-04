@@ -14,7 +14,7 @@ import polars as pl
 
 
 
-from api.app.compute.caches import PerFileCache, SeriesBundle, percent_from_equity
+from api.app.compute.caches import PerFileCache, SeriesBundle
 from api.app.data.loader import LoadedTrades
 
 from api.app.compute.downsampling import DownsampleResult, downsample_timeseries
@@ -56,7 +56,6 @@ class ContributorSeries:
 @dataclass
 class PortfolioView:
     equity: pl.DataFrame
-    percent_equity: pl.DataFrame
     daily_percent_portfolio: pl.DataFrame
     daily_returns: pl.DataFrame
     net_position: pl.DataFrame
@@ -98,13 +97,11 @@ class PortfolioAggregator:
 
         if not files:
             empty_equity = pl.DataFrame({"timestamp": [], "equity": []})
-            empty_percent = pl.DataFrame({"timestamp": [], "percent_equity": []})
             empty_daily = pl.DataFrame({"date": [], "pnl": [], "capital": [], "daily_return": []})
             empty_netpos = pl.DataFrame({"timestamp": [], "net_position": []})
             empty_margin = pl.DataFrame({"timestamp": [], "margin_used": []})
             return PortfolioView(
                 equity=empty_equity,
-                percent_equity=empty_percent,
                 daily_percent_portfolio=pl.DataFrame(
                     {"date": [], "pnl": [], "capital": [], "daily_pct": [], "cum_pct": []}
                 ),
@@ -178,7 +175,6 @@ class PortfolioAggregator:
             (pl.col("pnl").cum_sum() + starting_equity).alias("equity"),
 
         )
-        percent_equity = percent_from_equity(equity_curve)
 
 
 
@@ -199,7 +195,6 @@ class PortfolioAggregator:
 
         return PortfolioView(
             equity=equity_curve,
-            percent_equity=percent_equity,
             daily_percent_portfolio=portfolio_percent,
             daily_returns=combined_daily,
             net_position=netpos,
@@ -302,7 +297,6 @@ class PortfolioAggregator:
 
             equity = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=file_id)
 
-            percent_equity = self.cache.percent_equity_curve(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=file_id)
 
             daily = self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=file_id)
 
@@ -331,7 +325,6 @@ class PortfolioAggregator:
                     path=path,
                     bundle=SeriesBundle(
                         equity=equity,
-                        percent_equity=percent_equity,
                         daily_returns=daily,
                         daily_percent=daily_percent,
                         net_position=netpos,

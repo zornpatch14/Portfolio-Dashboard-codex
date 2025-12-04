@@ -49,7 +49,11 @@ def _portfolio_frame(series_name: str, view) -> tuple:
         return view.equity, "equity", "equity"
 
     if series_name in {"equity_percent", "equity-percent"}:
-        return view.percent_equity, "percent_equity", "equity_percent"
+        percent = view.daily_percent_portfolio.select(
+            pl.col("date").alias("timestamp"),
+            pl.col("cum_pct").alias("value"),
+        )
+        return percent, "value", "equity_percent"
 
     if series_name in {"drawdown", "intraday_drawdown"}:
         dd_values = _drawdown_from_equity(view.equity)
@@ -76,7 +80,11 @@ def _frame_from_contributor(series_name: str, contributor: ContributorSeries):
     if series_name == "equity":
         return bundle.equity, "equity"
     if series_name in {"equity_percent", "equity-percent"}:
-        return bundle.percent_equity, "percent_equity"
+        percent = bundle.daily_percent.select(
+            pl.col("date").alias("timestamp"),
+            pl.col("cum_pct").alias("value"),
+        )
+        return percent, "value"
     if series_name in {"drawdown", "intraday_drawdown"}:
         equity = bundle.equity
         dd_values = _drawdown_from_equity(equity)
