@@ -57,6 +57,7 @@ class ContributorSeries:
 class PortfolioView:
     equity: pl.DataFrame
     percent_equity: pl.DataFrame
+    daily_percent_portfolio: pl.DataFrame
     daily_returns: pl.DataFrame
     net_position: pl.DataFrame
     margin: pl.DataFrame
@@ -104,6 +105,9 @@ class PortfolioAggregator:
             return PortfolioView(
                 equity=empty_equity,
                 percent_equity=empty_percent,
+                daily_percent_portfolio=pl.DataFrame(
+                    {"date": [], "pnl": [], "capital": [], "daily_pct": [], "cum_pct": []}
+                ),
                 daily_returns=empty_daily,
                 net_position=empty_netpos,
                 margin=empty_margin,
@@ -178,6 +182,7 @@ class PortfolioAggregator:
 
 
 
+        portfolio_percent = _combine_daily_percent(contributors)
         netpos = _combine_timeseries(netpos_frames, "net_position")
 
         margin = _combine_timeseries(margin_frames, "margin_used")
@@ -195,6 +200,7 @@ class PortfolioAggregator:
         return PortfolioView(
             equity=equity_curve,
             percent_equity=percent_equity,
+            daily_percent_portfolio=portfolio_percent,
             daily_returns=combined_daily,
             net_position=netpos,
             margin=margin,
@@ -316,40 +322,27 @@ class PortfolioAggregator:
 
             label = (meta.original_filename or meta.filename) if meta else path.name
 
+            daily_percent = self.cache.daily_percent_returns(
+                path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=file_id
+            )
             contributors.append(
-
                 ContributorSeries(
-
                     file_id=file_id,
-
                     path=path,
-
                     bundle=SeriesBundle(
-
                         equity=equity,
-
                         percent_equity=percent_equity,
-
                         daily_returns=daily,
-
+                        daily_percent=daily_percent,
                         net_position=netpos,
-
                         margin=margin_usage,
-
                         spikes=spikes_df,
-
                     ),
-
                     label=label,
-
                     symbol=(meta.symbol or "").upper() if meta and meta.symbol else None,
-
                     interval=str(meta.interval) if meta and meta.interval is not None else None,
-
                     strategy=meta.strategy or None,
-
                 )
-
             )
 
         return contributors
@@ -379,4 +372,27 @@ def _combine_timeseries(frames: list[pl.DataFrame], value_col: str) -> pl.DataFr
     return combined
 
 
+
+def _combine_daily_percent(contributors: list[ContributorSeries]) -> pl.DataFrame:
+    if not contributors:
+        return pl.DataFrame({"date": [], "pnl": [], "capital": [], "daily_pct": [], "cum_pct": []})
+
+    rows: list[pl.DataFrame] = []
+    for contributor in contributors:
+        frame = contributor.bundle.daily_percent
+        if frame.is_empty():
+            continue
+        rows.append(frame.select("date", "pnl", "capital", "daily_return"))
+    if not rows:
+        return pl.DataFrame({"date": [], "pnl": [], "capital": [], "daily_pct": [], "cum_pct": []})
+
+    stacked = pl.concat(rows)
+    grouped = stacked.group_by("date").agg(
+        pnl=pl.col("pnl").sum(),
+        capital=pl.col("capital").sum(),
+    ).sort("date")
+    daily_pct = pl.when(pl.col("capital") > 0).then(pl.col("pnl") / pl.col("capital")).otherwise(0.0)
+    result = grouped.with_columns(daily_pct.alias("daily_pct"))
+    result = result.with_columns(pl.col("daily_pct").cumsum().alias("cum_pct"))
+    return result
 

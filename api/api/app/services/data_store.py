@@ -498,21 +498,14 @@ class DataStore:
             )
 
             view = PortfolioView(
-
                 equity=built.equity.clone(),
-
                 percent_equity=built.percent_equity.clone(),
-
+                daily_percent_portfolio=built.daily_percent_portfolio.clone(),
                 daily_returns=built.daily_returns.clone(),
-
                 net_position=built.net_position.clone(),
-
                 margin=built.margin.clone(),
-
                 contributors=list(built.contributors),
-
                 spikes=built.spikes.clone() if built.spikes is not None else None,
-
             )
 
             self._portfolio_cache[key] = view
@@ -551,6 +544,7 @@ class DataStore:
             payload = {
                 "equity": to_bytes(view.equity),
                 "percent_equity": to_bytes(view.percent_equity),
+                "daily_percent": to_bytes(view.daily_percent_portfolio),
                 "daily_returns": to_bytes(view.daily_returns),
                 "net_position": to_bytes(view.net_position),
                 "margin": to_bytes(view.margin),
@@ -561,6 +555,7 @@ class DataStore:
             encoded = {
                 "equity": base64.b64encode(payload["equity"]).decode(),
                 "percent_equity": base64.b64encode(payload["percent_equity"]).decode(),
+                "daily_percent": base64.b64encode(payload["daily_percent"]).decode(),
                 "daily_returns": base64.b64encode(payload["daily_returns"]).decode(),
                 "net_position": base64.b64encode(payload["net_position"]).decode(),
                 "margin": base64.b64encode(payload["margin"]).decode(),
@@ -609,15 +604,24 @@ class DataStore:
 
             equity = decode_frame(encoded.get("equity"))
             percent_equity = decode_frame(encoded.get("percent_equity"))
+            daily_percent = decode_frame(encoded.get("daily_percent"))
             daily = decode_frame(encoded.get("daily_returns"))
             netpos = decode_frame(encoded.get("net_position"))
             margin = decode_frame(encoded.get("margin"))
             spikes = decode_frame(encoded.get("spikes"))
-            if equity is None or percent_equity is None or daily is None or netpos is None or margin is None:
+            if (
+                equity is None
+                or percent_equity is None
+                or daily_percent is None
+                or daily is None
+                or netpos is None
+                or margin is None
+            ):
                 return None
             return PortfolioView(
                 equity=equity,
                 percent_equity=percent_equity,
+                daily_percent_portfolio=daily_percent,
                 daily_returns=daily,
                 net_position=netpos,
                 margin=margin,
@@ -673,6 +677,7 @@ class DataStore:
 
         view.equity = filter_frame(view.equity, "timestamp")
         view.percent_equity = filter_frame(view.percent_equity, "timestamp")
+        view.daily_percent_portfolio = filter_frame(view.daily_percent_portfolio, "date", is_date=True)
 
         view.net_position = filter_frame(view.net_position, "timestamp")
 
