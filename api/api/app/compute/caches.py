@@ -107,6 +107,12 @@ class PerFileCache:
         loaded: LoadedTrades | None = None,
         file_id: str | None = None,
     ) -> pl.DataFrame:
+        """Canonical daily percent-return series.
+
+        This derives additive percent returns directly from the cached daily_returns
+        artifact so every downstream consumer (series endpoints, Riskfolio, etc.)
+        reads the exact same MTM session P&L and capital logic.
+        """
         def builder(inner_loaded: LoadedTrades) -> pl.DataFrame:
             daily = self.daily_returns(
                 path,
