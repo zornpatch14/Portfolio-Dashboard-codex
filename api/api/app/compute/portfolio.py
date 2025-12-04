@@ -386,6 +386,6 @@ def _combine_daily_percent(contributors: list[ContributorSeries]) -> pl.DataFram
     ).sort("date")
     daily_pct = pl.when(pl.col("capital") > 0).then(pl.col("pnl") / pl.col("capital")).otherwise(0.0)
     result = grouped.with_columns(daily_pct.alias("daily_pct"))
-    result = result.with_columns(pl.col("daily_pct").cumsum().alias("cum_pct"))
+    result = result.with_columns(pl.col("daily_pct").cum_sum().alias("cum_pct"))
     return result
 

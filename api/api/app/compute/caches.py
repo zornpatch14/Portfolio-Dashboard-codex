@@ -127,8 +127,7 @@ class PerFileCache:
                     {"date": [], "session_start": [], "session_end": [], "pnl": [], "capital": [], "daily_return": [], "cum_pct": []}
                 )
             ordered = daily.sort("date")
-            cum_pct = ordered["daily_return"].cumsum()
-            return ordered.with_columns(cum_pct.alias("cum_pct"))
+            return ordered.with_columns(pl.col("daily_return").cum_sum().alias("cum_pct"))
 
         return self._get_or_build(
             path,
