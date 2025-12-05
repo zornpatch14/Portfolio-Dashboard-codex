@@ -262,8 +262,8 @@ class MeanRiskOptimizer:
         capital: float,
         rm_code: str,
     ) -> OptimizerSummary:
-        w_vec = weights.to_numpy().reshape((-1, 1))
-        mu = np.array(portfolio.mu, dtype=float)
+        w_vec = weights.astype(float).to_numpy().reshape((-1, 1))
+        mu = np.array(portfolio.mu, dtype=float).reshape((-1, 1))
         cov = np.array(portfolio.cov, dtype=float)
         scenarios = returns.to_numpy()
         series = scenarios @ w_vec
@@ -328,11 +328,12 @@ class MeanRiskOptimizer:
 
         data: List[FrontierPoint] = []
         cov = np.array(portfolio.cov, dtype=float)
+        mu = np.array(portfolio.mu, dtype=float).reshape((-1, 1))
         scenarios = returns.to_numpy()
         for column in frontier.columns:
             w = frontier[column].astype(float).to_numpy().reshape((-1, 1))
             series = scenarios @ w
-            expected = float(np.array(portfolio.mu).T @ w)
+            expected = float(mu.T @ w)
             risk_val = self._risk_value(rm_code, series, w, cov, settings.alpha)
             weights_dict = {asset: float(frontier.loc[asset, column]) for asset in frontier.index}
             data.append(
