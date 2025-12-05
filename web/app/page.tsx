@@ -141,6 +141,37 @@ const parseCapsInput = (input: string): { name: string; max_weight: number }[] =
     .filter((entry): entry is { name: string; max_weight: number } => entry !== null);
 type BoundsOverrideState = Record<string, { min?: string; max?: string }>;
 
+const clampToUnitInterval = (value: number) => Math.min(1, Math.max(0, value));
+
+const sanitizeWeightInputString = (value: string): string => {
+  if (value === '') return '';
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return value;
+  const clamped = clampToUnitInterval(parsed);
+  return clamped !== parsed ? clamped.toString() : value;
+};
+
+const enforceWeightInputBounds = (value: string, fallback: string): string => {
+  if (!value.trim()) return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return clampToUnitInterval(parsed).toString();
+};
+
+const parseWeightInputValue = (value: string, fallback: number): number => {
+  if (!value.trim()) return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return clampToUnitInterval(parsed);
+};
+
+const parseOptionalWeightInputValue = (value?: string | null): number | null => {
+  if (!value || !value.trim()) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return clampToUnitInterval(parsed);
+};
+
 
 
 type FilterValueMap = {
@@ -202,8 +233,8 @@ export default function HomePage() {
   const [meanRiskRiskFree, setMeanRiskRiskFree] = useState(5);
   const [meanRiskRiskAversion, setMeanRiskRiskAversion] = useState(2);
   const [meanRiskAlpha, setMeanRiskAlpha] = useState(0.05);
-  const [meanRiskMinBound, setMeanRiskMinBound] = useState(0);
-  const [meanRiskMaxBound, setMeanRiskMaxBound] = useState(1);
+  const [meanRiskMinBound, setMeanRiskMinBound] = useState('0');
+  const [meanRiskMaxBound, setMeanRiskMaxBound] = useState('1');
   const [meanRiskBudget, setMeanRiskBudget] = useState(1);
   const [meanRiskSymbolCaps, setMeanRiskSymbolCaps] = useState('');
   const [meanRiskStrategyCaps, setMeanRiskStrategyCaps] = useState('');
@@ -216,6 +247,9 @@ export default function HomePage() {
   const [optimizerStatus, setOptimizerStatus] = useState<JobStatusResponse | null>(null);
   const [optimizerLoading, setOptimizerLoading] = useState(false);
   const [optimizerError, setOptimizerError] = useState<string | null>(null);
+
+  const minWeightBound = useMemo(() => parseWeightInputValue(meanRiskMinBound, 0), [meanRiskMinBound]);
+  const maxWeightBound = useMemo(() => parseWeightInputValue(meanRiskMaxBound, 1), [meanRiskMaxBound]);
 
   const [selectionMeta, setSelectionMeta] = useState<Awaited<ReturnType<typeof getSelectionMeta>> | null>(null);
   const [filesMeta, setFilesMeta] = useState<Awaited<ReturnType<typeof listFiles>>>([]);
@@ -847,10 +881,11 @@ export default function HomePage() {
   }, [selectionKey]);
 
   const handleOverrideChange = useCallback((fileId: string, field: 'min' | 'max', value: string) => {
+    const sanitizedValue = sanitizeWeightInputString(value);
     setMeanRiskOverrides((prev) => {
       const next = { ...prev };
       const existing = next[fileId] ?? { min: '', max: '' };
-      const updated = { ...existing, [field]: value };
+      const updated = { ...existing, [field]: sanitizedValue };
       const hasValue =
         (updated.min && updated.min.trim() !== '') || (updated.max && updated.max.trim() !== '');
       if (!hasValue) {
@@ -877,8 +912,8 @@ export default function HomePage() {
     try {
       const boundsOverrides = Object.entries(meanRiskOverrides).reduce(
         (acc, [asset, bounds]) => {
-          const minVal = parseOptionalNumber(bounds.min ?? '');
-          const maxVal = parseOptionalNumber(bounds.max ?? '');
+          const minVal = parseOptionalWeightInputValue(bounds.min ?? null);
+          const maxVal = parseOptionalWeightInputValue(bounds.max ?? null);
           if (minVal === null && maxVal === null) {
             return acc;
           }
@@ -899,8 +934,8 @@ export default function HomePage() {
         alpha: meanRiskAlpha,
         budget: meanRiskBudget,
         bounds: {
-          default_min: meanRiskMinBound,
-          default_max: meanRiskMaxBound,
+          default_min: minWeightBound,
+          default_max: maxWeightBound,
           overrides: boundsOverrides,
         },
         symbol_caps: parseCapsInput(meanRiskSymbolCaps),
@@ -929,8 +964,8 @@ export default function HomePage() {
     meanRiskRiskAversion,
     meanRiskAlpha,
     meanRiskBudget,
-    meanRiskMinBound,
-    meanRiskMaxBound,
+    minWeightBound,
+    maxWeightBound,
     meanRiskSymbolCaps,
     meanRiskStrategyCaps,
     meanRiskMaxRisk,
@@ -2040,14 +2075,24 @@ export default function HomePage() {
                 <input
                   className="input"
                   type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  inputMode="decimal"
                   value={meanRiskMinBound}
-                  onChange={(event) => setMeanRiskMinBound(Number(event.target.value))}
+                  onChange={(event) => setMeanRiskMinBound(sanitizeWeightInputString(event.target.value))}
+                  onBlur={() => setMeanRiskMinBound((prev) => enforceWeightInputBounds(prev, '0'))}
                 />
                 <input
                   className="input"
                   type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  inputMode="decimal"
                   value={meanRiskMaxBound}
-                  onChange={(event) => setMeanRiskMaxBound(Number(event.target.value))}
+                  onChange={(event) => setMeanRiskMaxBound(sanitizeWeightInputString(event.target.value))}
+                  onBlur={() => setMeanRiskMaxBound((prev) => enforceWeightInputBounds(prev, '1'))}
                 />
               </div>
               <label className="field-label" htmlFor="budget" style={{ marginTop: 12 }}>Budget (sum of weights)</label>
@@ -2174,8 +2219,12 @@ export default function HomePage() {
                               type="number"
                               className="input"
                               style={{ maxWidth: 110 }}
+                              min={0}
+                              max={1}
+                              step={0.05}
+                              inputMode="decimal"
                               value={override?.min ?? ''}
-                              placeholder={String(meanRiskMinBound)}
+                              placeholder={String(minWeightBound)}
                               onChange={(event) => handleOverrideChange(fileId, 'min', event.target.value)}
                             />
                           </td>
@@ -2184,8 +2233,12 @@ export default function HomePage() {
                               type="number"
                               className="input"
                               style={{ maxWidth: 110 }}
+                              min={0}
+                              max={1}
+                              step={0.05}
+                              inputMode="decimal"
                               value={override?.max ?? ''}
-                              placeholder={String(meanRiskMaxBound)}
+                              placeholder={String(maxWeightBound)}
                               onChange={(event) => handleOverrideChange(fileId, 'max', event.target.value)}
                             />
                           </td>
