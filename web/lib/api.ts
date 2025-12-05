@@ -1,6 +1,19 @@
 import { Selection } from './selections';
 
+export const coerceNumber = (value: unknown, fallback = 0): number => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
 
+export const formatPercentSafe = (
+  value: number | null | undefined,
+  digits = 2,
+  emptyText = '--',
+): string => {
+  if (value === null || value === undefined) return emptyText;
+  if (!Number.isFinite(value)) return emptyText;
+  return `${(value * 100).toFixed(digits)}%`;
+};
 
 export type SeriesPoint = {
 

@@ -11,7 +11,7 @@ import riskfolio as rp
 import riskfolio.src.RiskFunctions as rk
 from fastapi import HTTPException, status
 
-from api.app.constants import DEFAULT_ACCOUNT_EQUITY, get_contract_spec
+from api.app.constants import DEFAULT_ACCOUNT_EQUITY
 from api.app.schemas import (
     AllocationRow,
     ContractRow,
@@ -214,9 +214,6 @@ class MeanRiskOptimizer:
         for weight, meta in zip(weights, metas):
             label = meta.original_filename or meta.filename
             margin = selection.margin_overrides.get(meta.file_id)
-            if margin is None:
-                spec = get_contract_spec(meta.symbol)
-                margin = spec.initial_margin if spec else None
             contracts = 0.0
             if margin and margin > 0:
                 contracts = max(weight * capital / margin, 0.0)

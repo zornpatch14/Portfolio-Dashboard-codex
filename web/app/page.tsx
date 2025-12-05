@@ -19,37 +19,22 @@ import { CorrelationHeatmap } from '../components/CorrelationHeatmap';
 import { EquityMultiChart } from '../components/EquityMultiChart';
 
 import {
-
   fetchCorrelations,
-
   fetchCta,
-
   fetchHistogram,
-
   fetchMetrics,
-
   fetchSeries,
-
   fetchJobStatus,
-
   submitRiskfolioJob,
-
   uploadFiles,
-
   getSelectionMeta,
-
   listFiles,
-
   mockCorrelations,
-
   mockCta,
-
   SeriesKind,
-
   JobStatusResponse,
-
   MeanRiskPayload,
-
+  coerceNumber,
 } from '../lib/api';
 
 import { loadSampleSelections, normalizeSelection, Selection } from '../lib/selections';
@@ -184,6 +169,37 @@ type FilterValueMap = {
 
 };
 
+type RiskfolioSuggestedRow = {
+  asset: string;
+  label: string;
+  weight: number;
+  marginPerContract: number;
+  suggestedContracts: number;
+  currentContracts: number;
+  suggestedMargin: number;
+  currentMargin: number;
+  suggestedGap: number | null;
+  currentGap: number | null;
+  delta: number;
+};
+
+type RiskfolioSuggestedSummary = {
+  suggestedContractsTotal: number;
+  currentContractsTotal: number;
+  suggestedMarginTotal: number;
+  currentMarginTotal: number;
+  maxSuggestedGap: number | null;
+  avgSuggestedGap: number | null;
+  maxCurrentGap: number | null;
+  avgCurrentGap: number | null;
+};
+
+type RiskfolioSuggestions = {
+  rows: RiskfolioSuggestedRow[];
+  summary: RiskfolioSuggestedSummary | null;
+  note: string;
+};
+
 
 
 const arraysEqual = (a: string[] = [], b: string[] = []) => a.length === b.length && a.every((val, idx) => val === b[idx]);
@@ -262,6 +278,7 @@ export default function HomePage() {
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const accountEquity = activeSelection.accountEquity ?? selectionMeta?.account_equity ?? ACCOUNT_EQUITY_FALLBACK;
+  const [riskfolioContractEquity, setRiskfolioContractEquity] = useState(accountEquity);
 
   const optimizerResult = optimizerStatus?.result ?? null;
 
@@ -274,6 +291,10 @@ export default function HomePage() {
     (optimizerStatus === null ||
 
       (optimizerStatus.status !== 'completed' && optimizerStatus.status !== 'failed'));
+
+  useEffect(() => {
+    setRiskfolioContractEquity(accountEquity);
+  }, [accountEquity]);
 
   useEffect(() => {
 
@@ -872,6 +893,112 @@ export default function HomePage() {
 
 
   const selectionKey = useMemo(() => JSON.stringify(selectionForFetch), [selectionForFetch]);
+
+  const riskfolioContracts = useMemo<RiskfolioSuggestions>(() => {
+    const equity = Math.max(0, coerceNumber(riskfolioContractEquity, 0));
+    const note = `Account equity: ${formatCurrency(equity)}. Contracts = floor(weight * account equity / the margin input on Load Trade Lists).`;
+    const allocations = optimizerResult?.weights ?? [];
+    if (!allocations.length) {
+      return { rows: [], summary: null, note };
+    }
+
+    const contractMap = activeSelection.contractMultipliers ?? activeSelection.contracts ?? {};
+    const marginMap = activeSelection.marginOverrides ?? activeSelection.margins ?? {};
+
+    const rows: RiskfolioSuggestedRow[] = [];
+    let totalSuggestedContracts = 0;
+    let totalCurrentContracts = 0;
+    let totalSuggestedMargin = 0;
+    let totalCurrentMargin = 0;
+    let maxSuggestedGap: number | null = null;
+    let maxCurrentGap: number | null = null;
+    let suggestedGapSum = 0;
+    let currentGapSum = 0;
+    let activeWeightCount = 0;
+
+    allocations.forEach((allocation) => {
+      const asset = allocation.asset;
+      const fileLabel = fileLabelMap[asset] || allocation.label || asset;
+      const weight = coerceNumber(allocation.weight, 0);
+      const marginValue =
+        (marginMap && Object.prototype.hasOwnProperty.call(marginMap, asset) ? marginMap[asset] : undefined) ??
+        allocation.margin_per_contract;
+      const marginPerContract = coerceNumber(marginValue, 0);
+      const currentContractsRaw =
+        (contractMap && Object.prototype.hasOwnProperty.call(contractMap, asset) ? contractMap[asset] : undefined) ?? 0;
+      const currentContracts = Math.round(coerceNumber(currentContractsRaw, 0));
+      const allocationNotional = weight * equity;
+      const suggestedContracts =
+        marginPerContract > 0 ? Math.max(0, Math.floor(allocationNotional / marginPerContract)) : 0;
+      const suggestedMargin = suggestedContracts * marginPerContract;
+      const currentMargin = currentContracts * marginPerContract;
+
+      totalSuggestedContracts += Math.max(0, suggestedContracts);
+      totalCurrentContracts += Math.max(0, currentContracts);
+      totalSuggestedMargin += Math.max(0, suggestedMargin);
+      totalCurrentMargin += Math.max(0, currentMargin);
+
+      let suggestedGap: number | null = null;
+      let currentGap: number | null = null;
+
+      if (equity > 0 && Number.isFinite(suggestedMargin)) {
+        const impliedWeight = suggestedMargin / equity;
+        suggestedGap = weight - impliedWeight;
+        const gapAbs = Math.abs(suggestedGap);
+        maxSuggestedGap = maxSuggestedGap === null ? gapAbs : Math.max(maxSuggestedGap, gapAbs);
+        suggestedGapSum += gapAbs;
+      }
+
+      if (equity > 0 && Number.isFinite(currentMargin)) {
+        const impliedWeight = currentMargin / equity;
+        currentGap = weight - impliedWeight;
+        const gapAbs = Math.abs(currentGap);
+        maxCurrentGap = maxCurrentGap === null ? gapAbs : Math.max(maxCurrentGap, gapAbs);
+        currentGapSum += gapAbs;
+      }
+
+      if (weight !== 0) {
+        activeWeightCount += 1;
+      }
+
+      rows.push({
+        asset,
+        label: fileLabel,
+        weight,
+        marginPerContract,
+        suggestedContracts,
+        currentContracts,
+        suggestedMargin,
+        currentMargin,
+        suggestedGap,
+        currentGap,
+        delta: suggestedContracts - currentContracts,
+      });
+    });
+
+    const summary: RiskfolioSuggestedSummary | null = rows.length
+      ? {
+          suggestedContractsTotal: totalSuggestedContracts,
+          currentContractsTotal: totalCurrentContracts,
+          suggestedMarginTotal: totalSuggestedMargin,
+          currentMarginTotal: totalCurrentMargin,
+          maxSuggestedGap,
+          avgSuggestedGap: activeWeightCount ? suggestedGapSum / activeWeightCount : null,
+          maxCurrentGap,
+          avgCurrentGap: activeWeightCount ? currentGapSum / activeWeightCount : null,
+        }
+      : null;
+
+    return { rows, summary, note };
+  }, [
+    optimizerResult,
+    activeSelection.contractMultipliers,
+    activeSelection.contracts,
+    activeSelection.marginOverrides,
+    activeSelection.margins,
+    riskfolioContractEquity,
+    fileLabelMap,
+  ]);
 
   useEffect(() => {
     setOptimizerStatus(null);
