@@ -701,14 +701,6 @@ export default function HomePage() {
     };
   }, [optimizerJobId]);
 
-  useEffect(() => {
-    setOptimizerStatus(null);
-    setOptimizerJobId(null);
-    setOptimizerError(null);
-    setOptimizerLoading(false);
-  }, [selectionKey]);
-
-
   const matchesFilters = useCallback(
 
     (fileId: string) => {
@@ -846,6 +838,13 @@ export default function HomePage() {
 
 
   const selectionKey = useMemo(() => JSON.stringify(selectionForFetch), [selectionForFetch]);
+
+  useEffect(() => {
+    setOptimizerStatus(null);
+    setOptimizerJobId(null);
+    setOptimizerError(null);
+    setOptimizerLoading(false);
+  }, [selectionKey]);
 
   const handleOverrideChange = useCallback((fileId: string, field: 'min' | 'max', value: string) => {
     setMeanRiskOverrides((prev) => {
