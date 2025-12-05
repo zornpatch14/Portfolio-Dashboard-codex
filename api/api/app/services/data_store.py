@@ -1122,5 +1122,61 @@ class DataStore:
 
         return MetricsResponse(selection=selection, rows=rows)
 
+    # ---------------- optimizer helpers ----------------
+
+    def returns_frame(self, selection: Selection) -> tuple[pd.DataFrame, list[TradeFileMetadata]]:
+        """
+        Assemble a pandas DataFrame of per-file daily returns suitable for Riskfolio.
+
+        Columns map to file ids; index is the trading date. Missing values (no trades
+        on a given date) are filled with 0 so Riskfolio receives a dense matrix.
+        """
+        metas = self._metas_for_selection(selection)
+        if not metas:
+            return pd.DataFrame(), []
+
+        start_date = selection.start_date
+        end_date = selection.end_date
+
+        loaded_trades = self._load_trades_map(metas)
+        series: list[pd.DataFrame] = []
+
+        for meta in metas:
+            path = Path(meta.trades_path)
+            multiplier = selection.contract_multipliers.get(meta.file_id)
+            margin_override = selection.margin_overrides.get(meta.file_id)
+            loaded = loaded_trades.get(meta.file_id)
+
+            daily = self.cache.daily_percent_returns(
+                path,
+                contract_multiplier=multiplier,
+                margin_override=margin_override,
+                direction=selection.direction,
+                loaded=loaded,
+                file_id=meta.file_id,
+            )
+            if daily.is_empty():
+                continue
+
+            frame = daily.select(["date", "daily_return"]).to_pandas()
+            frame["date"] = pd.to_datetime(frame["date"])
+            if start_date:
+                frame = frame[frame["date"] >= pd.Timestamp(start_date)]
+            if end_date:
+                frame = frame[frame["date"] <= pd.Timestamp(end_date)]
+            if frame.empty:
+                continue
+
+            frame = frame.set_index("date").sort_index()
+            frame.rename(columns={"daily_return": meta.file_id}, inplace=True)
+            series.append(frame)
+
+        if not series:
+            return pd.DataFrame(), metas
+
+        combined = pd.concat(series, axis=1, join="outer").sort_index()
+        combined = combined.fillna(0.0)
+        return combined, metas
+
 store = DataStore()
 
