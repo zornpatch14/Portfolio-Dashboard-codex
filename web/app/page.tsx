@@ -263,6 +263,7 @@ export default function HomePage() {
   const [optimizerStatus, setOptimizerStatus] = useState<JobStatusResponse | null>(null);
   const [optimizerLoading, setOptimizerLoading] = useState(false);
   const [optimizerError, setOptimizerError] = useState<string | null>(null);
+  const [riskfolioApplyMessage, setRiskfolioApplyMessage] = useState<string | null>(null);
 
   const minWeightBound = useMemo(() => parseWeightInputValue(meanRiskMinBound, 0), [meanRiskMinBound]);
   const maxWeightBound = useMemo(() => parseWeightInputValue(meanRiskMaxBound, 1), [meanRiskMaxBound]);
@@ -999,6 +1000,9 @@ export default function HomePage() {
     riskfolioContractEquity,
     fileLabelMap,
   ]);
+  useEffect(() => {
+    setRiskfolioApplyMessage(null);
+  }, [riskfolioContracts]);
 
   useEffect(() => {
     setOptimizerStatus(null);
@@ -1026,6 +1030,43 @@ export default function HomePage() {
       return next;
     });
   }, []);
+
+  const handleApplyRiskfolioContracts = useCallback(() => {
+    if (!riskfolioContracts.rows.length) {
+      setRiskfolioApplyMessage('Run the optimizer to generate suggested contracts.');
+      return;
+    }
+    setActiveSelection((prev) => {
+      const current = prev.contractMultipliers ?? prev.contracts ?? {};
+      const next = { ...current };
+      let changed = false;
+      riskfolioContracts.rows.forEach((row) => {
+        if (next[row.asset] !== row.suggestedContracts) {
+          next[row.asset] = row.suggestedContracts;
+          changed = true;
+        }
+      });
+      if (!changed) {
+        return prev;
+      }
+      return {
+        ...prev,
+        contracts: next,
+        contractMultipliers: next,
+      };
+    });
+    setRiskfolioApplyMessage(
+      `Applied Riskfolio suggested contracts to ${riskfolioContracts.rows.length} file${riskfolioContracts.rows.length === 1 ? '' : 's'}.`,
+    );
+  }, [riskfolioContracts, setActiveSelection]);
+
+  const formatRiskfolioGap = (gap: number | null) => (gap === null ? 'n/a' : formatPercent(gap));
+  const formatRiskfolioGapSummary = (max: number | null, avg: number | null) => {
+    if (max === null) return 'Max: n/a';
+    const avgText = avg === null ? 'n/a' : formatPercent(avg);
+    return `Max: ${formatPercent(max)} / Avg: ${avgText}`;
+  };
+  const canApplyRiskfolio = riskfolioContracts.rows.length > 0;
 
   const handleOptimize = useCallback(async () => {
     if (!filteredFileIds.length) {
@@ -2514,53 +2555,93 @@ export default function HomePage() {
                 id="riskfolio-equity"
                 className="input"
                 type="number"
-                value={accountEquity}
-                readOnly
+                min={0}
+                step={100}
+                value={riskfolioContractEquity}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setRiskfolioContractEquity(Number.isFinite(next) ? next : 0);
+                }}
                 style={{ maxWidth: 200 }}
               />
-              <button type="button" className="button" disabled>
+              <button
+                type="button"
+                className="button"
+                disabled={!canApplyRiskfolio}
+                onClick={handleApplyRiskfolioContracts}
+              >
                 Apply Suggested Contracts
               </button>
             </div>
             <div className="text-muted small" style={{ marginTop: 10 }}>
-              Contract suggestions are based solely on optimizer weights. Future versions will incorporate gap analysis.
+              {riskfolioApplyMessage ||
+                (canApplyRiskfolio
+                  ? 'Adjust the account equity to sandbox suggested contract counts before applying.'
+                  : 'Run the optimizer to populate suggested contracts.')}
             </div>
             <div className="table-wrapper" style={{ marginTop: 10 }}>
               <table className="compact-table">
                 <thead>
                   <tr>
                     <th>Asset</th>
-                    <th>Weight</th>
-                    <th>Contracts</th>
+                    <th>Optimized Weight</th>
+                    <th>Suggested Gap</th>
+                    <th>Current Gap</th>
                     <th>Margin / Contract</th>
-                    <th>Total Margin</th>
+                    <th>Suggested Contracts</th>
+                    <th>Suggested Margin</th>
+                    <th>Current Contracts</th>
+                    <th>Current Margin</th>
+                    <th>Delta</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {contractRows.length ? (
-                    contractRows.map((row) => {
-                      const allocation = weightRows.find((weight) => weight.asset === row.asset);
-                      return (
+                  {riskfolioContracts.rows.length ? (
+                    <>
+                      {riskfolioContracts.rows.map((row) => (
                         <tr key={row.asset}>
-                          <td>{allocation?.label ?? row.asset}</td>
-                          <td>{formatPercent(allocation?.weight ?? null)}</td>
-                          <td>{row.contracts.toFixed(2)}</td>
-                          <td>
-                            {allocation?.margin_per_contract !== undefined && allocation?.margin_per_contract !== null
-                              ? formatCurrency(allocation.margin_per_contract)
-                              : '--'}
-                          </td>
-                          <td>{row.margin !== undefined && row.margin !== null ? formatCurrency(row.margin) : '--'}</td>
+                          <td>{row.label}</td>
+                          <td>{formatPercent(row.weight)}</td>
+                          <td>{formatRiskfolioGap(row.suggestedGap)}</td>
+                          <td>{formatRiskfolioGap(row.currentGap)}</td>
+                          <td>{row.marginPerContract > 0 ? formatCurrency(row.marginPerContract) : '--'}</td>
+                          <td>{row.suggestedContracts.toLocaleString()}</td>
+                          <td>{formatCurrency(row.suggestedMargin)}</td>
+                          <td>{row.currentContracts.toLocaleString()}</td>
+                          <td>{formatCurrency(row.currentMargin)}</td>
+                          <td>{row.delta > 0 ? `+${row.delta}` : row.delta.toString()}</td>
                         </tr>
-                      );
-                    })
+                      ))}
+                      {riskfolioContracts.summary ? (
+                        <tr>
+                          <td>Totals</td>
+                          <td />
+                          <td>{formatRiskfolioGapSummary(riskfolioContracts.summary.maxSuggestedGap, riskfolioContracts.summary.avgSuggestedGap)}</td>
+                          <td>{formatRiskfolioGapSummary(riskfolioContracts.summary.maxCurrentGap, riskfolioContracts.summary.avgCurrentGap)}</td>
+                          <td />
+                          <td>{riskfolioContracts.summary.suggestedContractsTotal.toLocaleString()}</td>
+                          <td>{formatCurrency(riskfolioContracts.summary.suggestedMarginTotal)}</td>
+                          <td>{riskfolioContracts.summary.currentContractsTotal.toLocaleString()}</td>
+                          <td>{formatCurrency(riskfolioContracts.summary.currentMarginTotal)}</td>
+                          <td>
+                            {(
+                              riskfolioContracts.summary.suggestedContractsTotal -
+                              riskfolioContracts.summary.currentContractsTotal
+                            ).toLocaleString()}
+                          </td>
+                        </tr>
+                      ) : null}
+                    </>
                   ) : (
                     <tr>
-                      <td colSpan={5}>Run optimizer to populate suggested contracts.</td>
+                      <td colSpan={10}>Run the optimizer to populate suggested contracts.</td>
                     </tr>
                   )}
                 </tbody>
               </table>
+            </div>
+            <div className="text-muted small" style={{ marginTop: 8 }}>
+              {riskfolioContracts.note}
             </div>
           </div>
 
