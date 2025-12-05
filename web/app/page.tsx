@@ -2,21 +2,19 @@
 
 
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useQuery } from '@tanstack/react-query';
 
 import MetricsGrid from '../components/MetricsGrid';
 
 import SeriesChart from '../components/SeriesChart';
-
 import { HistogramChart } from '../components/HistogramChart';
-
 import { SelectionControls } from '../components/SelectionControls';
-
 import { CorrelationHeatmap } from '../components/CorrelationHeatmap';
-
 import { EquityMultiChart } from '../components/EquityMultiChart';
+import { EfficientFrontierChart } from '../components/EfficientFrontierChart';
+import { FrontierAllocationAreaChart } from '../components/FrontierAllocationAreaChart';
 
 import {
   fetchCorrelations,
@@ -280,8 +278,12 @@ export default function HomePage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const accountEquity = activeSelection.accountEquity ?? selectionMeta?.account_equity ?? ACCOUNT_EQUITY_FALLBACK;
   const [riskfolioContractEquity, setRiskfolioContractEquity] = useState(accountEquity);
+  const [selectedFrontierIdx, setSelectedFrontierIdx] = useState<number | null>(null);
 
   const optimizerResult = optimizerStatus?.result ?? null;
+  const optimizerWeights = optimizerResult?.weights ?? [];
+  const frontierRows = optimizerResult?.frontier ?? [];
+  const lastFrontierSignature = useRef<string | null>(null);
 
   const optimizerProgress = optimizerStatus?.progress ?? 0;
 
@@ -292,6 +294,170 @@ export default function HomePage() {
     (optimizerStatus === null ||
 
       (optimizerStatus.status !== 'completed' && optimizerStatus.status !== 'failed'));
+
+  const optimizerBacktestSeries = useMemo(() => {
+    if (!optimizerResult?.backtest?.length) return [];
+    return optimizerResult.backtest.map((line) => ({
+      name: line.label,
+      points: line.points.map((point) => ({ timestamp: point.timestamp, value: point.value })),
+    }));
+  }, [optimizerResult]);
+
+  const optimizerCorrelationData = useMemo(() => {
+    const payload = optimizerResult?.correlation;
+    if (!payload || !payload.matrix?.length || payload.labels.length < 2) {
+      return null;
+    }
+    return {
+      labels: payload.labels,
+      matrix: payload.matrix,
+      mode: payload.mode ?? 'returns',
+      notes: [`${payload.labels.length} assets`],
+    };
+  }, [optimizerResult]);
+
+  const frontierPoints = useMemo(
+    () =>
+      frontierRows.map((point, idx) => ({
+        idx,
+        risk: point.risk,
+        expectedReturn: point.expected_return,
+        weights: point.weights,
+      })),
+    [frontierRows],
+  );
+
+  const sortedFrontierPoints = useMemo(
+    () => [...frontierPoints].sort((a, b) => a.risk - b.risk),
+    [frontierPoints],
+  );
+
+  const frontierAllocationSeries = useMemo(() => {
+    if (!sortedFrontierPoints.length) return [];
+    const assetSet = new Set<string>();
+    sortedFrontierPoints.forEach((point) => {
+      Object.keys(point.weights ?? {}).forEach((asset) => assetSet.add(asset));
+    });
+    return Array.from(assetSet).map((asset) => ({
+      asset,
+      values: sortedFrontierPoints.map((point) => ({
+        risk: point.risk,
+        weight: point.weights[asset] ?? 0,
+        idx: point.idx,
+      })),
+    }));
+  }, [sortedFrontierPoints]);
+
+  const incumbentWeightMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    optimizerWeights.forEach((row) => {
+      map[row.asset] = row.weight;
+    });
+    return map;
+  }, [optimizerWeights]);
+
+  const incumbentLabelMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    optimizerWeights.forEach((row) => {
+      map[row.asset] = row.label;
+    });
+    return map;
+  }, [optimizerWeights]);
+
+  const selectedFrontierPoint =
+    selectedFrontierIdx !== null && selectedFrontierIdx < frontierPoints.length
+      ? frontierPoints[selectedFrontierIdx]
+      : null;
+
+  const frontierComparisonRows = useMemo(() => {
+    if (!selectedFrontierPoint) return [];
+    const assets = Array.from(
+      new Set([
+        ...Object.keys(selectedFrontierPoint.weights ?? {}),
+        ...Object.keys(incumbentWeightMap),
+      ]),
+    ).sort();
+    return assets.map((asset) => {
+      const optimized = incumbentWeightMap[asset] ?? 0;
+      const candidate = selectedFrontierPoint.weights[asset] ?? 0;
+      return {
+        asset,
+        label: incumbentLabelMap[asset] ?? asset,
+        incumbent: optimized,
+        frontier: candidate,
+        delta: candidate - optimized,
+      };
+    });
+  }, [selectedFrontierPoint, incumbentWeightMap, incumbentLabelMap]);
+
+  const frontierSignature = useMemo(
+    () =>
+      frontierRows
+        .map(
+          (point) =>
+            `${point.expected_return.toFixed(6)}|${point.risk.toFixed(6)}|${Object.keys(point.weights).length}`,
+        )
+        .join(';'),
+    [frontierRows],
+  );
+
+  const weightSignature = useMemo(() => {
+    if (!optimizerWeights.length) return '';
+    return optimizerWeights
+      .map((row) => `${row.asset}:${row.weight.toFixed(6)}`)
+      .sort()
+      .join('|');
+  }, [optimizerWeights]);
+
+  const frontierStateSignature = useMemo(
+    () => `${frontierSignature}|${weightSignature}`,
+    [frontierSignature, weightSignature],
+  );
+
+  const handleFrontierSelect = useCallback((idx: number) => {
+    setSelectedFrontierIdx(idx);
+  }, []);
+
+  useEffect(() => {
+    if (!frontierPoints.length) {
+      setSelectedFrontierIdx(null);
+      lastFrontierSignature.current = null;
+      return;
+    }
+    if (lastFrontierSignature.current === frontierStateSignature && selectedFrontierIdx !== null) {
+      return;
+    }
+    if (!frontierStateSignature) return;
+    lastFrontierSignature.current = frontierStateSignature;
+    if (!Object.keys(incumbentWeightMap).length) {
+      setSelectedFrontierIdx(0);
+      return;
+    }
+    let closestIdx = 0;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    frontierPoints.forEach((point, idx) => {
+      let diff = 0;
+      const assets = new Set([
+        ...Object.keys(point.weights ?? {}),
+        ...Object.keys(incumbentWeightMap),
+      ]);
+      assets.forEach((asset) => {
+        diff += Math.abs((point.weights[asset] ?? 0) - (incumbentWeightMap[asset] ?? 0));
+      });
+      if (diff < bestDistance) {
+        bestDistance = diff;
+        closestIdx = idx;
+      }
+    });
+    setSelectedFrontierIdx(closestIdx);
+  }, [frontierPoints, frontierStateSignature, incumbentWeightMap, selectedFrontierIdx]);
+
+  const selectedFrontierMetrics = selectedFrontierPoint
+    ? {
+        expected: selectedFrontierPoint.expectedReturn,
+        risk: selectedFrontierPoint.risk,
+      }
+    : null;
 
   useEffect(() => {
     setRiskfolioContractEquity(accountEquity);
@@ -894,7 +1060,7 @@ export default function HomePage() {
   const riskfolioContracts = useMemo<RiskfolioSuggestions>(() => {
     const equity = Math.max(0, coerceNumber(riskfolioContractEquity, 0));
     const note = `Account equity: ${formatCurrency(equity)}. Contracts = floor(weight * account equity / the margin input on Load Trade Lists).`;
-    const allocations = optimizerResult?.weights ?? [];
+    const allocations = optimizerWeights;
     if (!allocations.length) {
       return { rows: [], summary: null, note };
     }
@@ -2137,10 +2303,8 @@ export default function HomePage() {
 
       <div className="text-muted small" style={{ marginTop: 10 }}>
 
-        {correlationQuery.data?.notes.map((note) => (
-
+        {correlationQuery.data?.notes?.map((note) => (
           <div key={note}>- {note}</div>
-
         ))}
 
       </div>
@@ -2154,8 +2318,7 @@ export default function HomePage() {
   const renderOptimizer = () => {
   const summary = optimizerResult?.summary;
   const contractRows = optimizerResult?.contracts ?? [];
-  const weightRows = optimizerResult?.weights ?? [];
-  const frontierRows = optimizerResult?.frontier ?? [];
+  const weightRows = optimizerWeights;
   const statusLabel = optimizerStatus?.status ?? (optimizerJobId ? 'running' : 'idle');
   const progressWidth = Math.min(
     100,
@@ -2643,42 +2806,119 @@ export default function HomePage() {
 
           <div className="grid-2" style={{ marginTop: 16 }}>
             <div className="card">
-              <strong>Efficient Frontier</strong>
-              {frontierRows.length ? (
+              <strong>Frontier Explorer</strong>
+              {frontierPoints.length ? (
+                <>
+                  <div className="text-muted small" style={{ marginTop: 6 }}>
+                    Click any point to compare it against the optimized allocation.
+                  </div>
+                  <EfficientFrontierChart
+                    points={frontierPoints}
+                    selectedIndex={selectedFrontierIdx}
+                    onSelect={handleFrontierSelect}
+                  />
+                  {selectedFrontierMetrics ? (
+                    <div className="grid-2" style={{ marginTop: 12 }}>
+                      <div className="metric-card">
+                        <span className="text-muted small">Selected Expected Return</span>
+                        <strong>{formatPercent(selectedFrontierMetrics.expected)}</strong>
+                      </div>
+                      <div className="metric-card">
+                        <span className="text-muted small">Selected Risk</span>
+                        <strong>{formatPercent(selectedFrontierMetrics.risk)}</strong>
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <div className="placeholder-text">
+                  Run optimizer with efficient frontier points &gt; 0 to populate the chart.
+                </div>
+              )}
+            </div>
+            <div className="card">
+              <strong>Allocation Across Frontier</strong>
+              {frontierAllocationSeries.length ? (
+                <>
+                  <div className="text-muted small" style={{ marginTop: 6 }}>
+                    Hover to inspect how each asset shifts along the frontier, or click anywhere to set the comparison point.
+                  </div>
+                  <FrontierAllocationAreaChart
+                    series={frontierAllocationSeries}
+                    selectedIndex={selectedFrontierIdx}
+                    onSelect={handleFrontierSelect}
+                  />
+                </>
+              ) : (
+                <div className="placeholder-text">
+                  Run optimizer with multiple assets to inspect allocation drift along the frontier.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="card" style={{ marginTop: 14 }}>
+            <strong>Weight Comparison vs Optimized Solution</strong>
+            {frontierComparisonRows.length ? (
+              <div className="table-wrapper" style={{ marginTop: 10 }}>
                 <table className="compact-table">
                   <thead>
                     <tr>
-                      <th>Expected Return</th>
-                      <th>Risk</th>
+                      <th>Asset</th>
+                      <th>Optimized</th>
+                      <th>Frontier</th>
+                      <th>Delta</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {frontierRows.slice(0, 10).map((point, idx) => (
-                      <tr key={`${point.expected_return}-${idx}`}>
-                        <td>{formatPercent(point.expected_return)}</td>
-                        <td>{formatPercent(point.risk)}</td>
+                    {frontierComparisonRows.map((row) => (
+                      <tr key={row.asset}>
+                        <td>{row.label}</td>
+                        <td>{formatPercent(row.incumbent)}</td>
+                        <td>{formatPercent(row.frontier)}</td>
+                        <td>{row.delta > 0 ? `+${formatPercent(row.delta)}` : formatPercent(row.delta)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              ) : (
-                <div className="placeholder-text">Run optimizer with frontier points &gt; 0 to view the curve.</div>
-              )}
-            </div>
-            <div className="card">
-              <strong>Risk Contribution (%)</strong>
-              <div className="placeholder-text">Risk contribution charts coming soon.</div>
-            </div>
+              </div>
+            ) : (
+              <div className="placeholder-text">
+                Select a point on the efficient frontier to compare against the optimized allocation.
+              </div>
+            )}
           </div>
 
           <div className="grid-2" style={{ marginTop: 16 }}>
-            <div className="card">
-              <strong>Backtested Portfolio Equity</strong>
-              <div className="placeholder-text">Backtest overlay coming soon.</div>
+            <div>
+              {optimizerBacktestSeries.length ? (
+                <EquityMultiChart
+                  title="Backtested Portfolio Equity"
+                  description="Daily rebalanced using optimizer weights versus an equal-weight baseline."
+                  series={optimizerBacktestSeries}
+                  height={320}
+                />
+              ) : (
+                <div className="card">
+                  <strong>Backtested Portfolio Equity</strong>
+                  <div className="placeholder-text">Run the optimizer to generate the backtest overlay.</div>
+                </div>
+              )}
             </div>
             <div className="card">
               <strong>Asset Correlation</strong>
-              <div className="placeholder-text">Asset correlation heatmap coming soon.</div>
+              {optimizerCorrelationData ? (
+                <>
+                  <CorrelationHeatmap data={optimizerCorrelationData} />
+                  <div className="text-muted small" style={{ marginTop: 8 }}>
+                    Correlation matrix derived from the Riskfolio input returns (akin to plot_clusters).
+                  </div>
+                </>
+              ) : (
+                <div className="placeholder-text">
+                  Need at least two optimized assets to render the correlation heatmap.
+                </div>
+              )}
             </div>
           </div>
         </>

@@ -300,11 +300,24 @@ class FrontierPoint(BaseModel):
     weights: Dict[str, float]
 
 
+class BacktestSeries(BaseModel):
+    label: str
+    points: List[SeriesPoint] = Field(default_factory=list)
+
+
+class OptimizerCorrelation(BaseModel):
+    mode: str = "returns"
+    labels: List[str]
+    matrix: List[List[float]]
+
+
 class JobResult(BaseModel):
     summary: Optional[OptimizerSummary] = None
     weights: List[AllocationRow] = Field(default_factory=list)
     contracts: List[ContractRow] = Field(default_factory=list)
     frontier: List[FrontierPoint] = Field(default_factory=list)
+    backtest: List[BacktestSeries] = Field(default_factory=list)
+    correlation: Optional[OptimizerCorrelation] = None
 
 
 class JobStatusResponse(BaseModel):

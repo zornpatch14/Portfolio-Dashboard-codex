@@ -114,15 +114,10 @@ export type MetricsRow = {
 
 
 export type CorrelationResponse = {
-
   labels: string[];
-
   matrix: number[][];
-
   mode: string;
-
-  notes: string[];
-
+  notes?: string[];
 };
 
 
@@ -207,11 +202,24 @@ export type FrontierPoint = {
   weights: Record<string, number>;
 };
 
+export type BacktestSeriesLine = {
+  label: string;
+  points: SeriesPoint[];
+};
+
+export type OptimizerCorrelation = {
+  mode: string;
+  labels: string[];
+  matrix: number[][];
+};
+
 export type JobResult = {
   summary?: OptimizerSummary | null;
   weights: AllocationRow[];
   contracts: ContractRow[];
   frontier: FrontierPoint[];
+  backtest: BacktestSeriesLine[];
+  correlation?: OptimizerCorrelation | null;
 };
 
 export type OptimizerJobResponse = {

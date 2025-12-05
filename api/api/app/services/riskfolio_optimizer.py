@@ -14,15 +14,18 @@ from fastapi import HTTPException, status
 from api.app.constants import DEFAULT_ACCOUNT_EQUITY
 from api.app.schemas import (
     AllocationRow,
+    BacktestSeries,
     ContractRow,
     FrontierPoint,
     JobEvent,
     JobResult,
     JobStatusResponse,
     MeanRiskSettings,
+    OptimizerCorrelation,
     OptimizerJobRequest,
     OptimizerJobResponse,
     OptimizerSummary,
+    SeriesPoint,
 )
 
 from .data_store import DataStore, store as data_store
@@ -103,8 +106,17 @@ class MeanRiskOptimizer:
         frontier = self._efficient_frontier(
             settings, portfolio, rm_code, kelly_mode, risk_free, returns
         )
+        backtest = self._backtested_equity_series(returns, weights_df.iloc[:, 0], capital)
+        correlation = self._correlation_payload(returns)
 
-        return JobResult(summary=summary, weights=allocation_rows, contracts=contract_rows, frontier=frontier)
+        return JobResult(
+            summary=summary,
+            weights=allocation_rows,
+            contracts=contract_rows,
+            frontier=frontier,
+            backtest=backtest,
+            correlation=correlation,
+        )
 
     def _risk_measure(self, label: str) -> str:
         mapping = {
@@ -341,6 +353,50 @@ class MeanRiskOptimizer:
                 )
             )
         return data
+
+    def _backtested_equity_series(
+        self,
+        returns: pd.DataFrame,
+        weights: pd.Series,
+        capital: float,
+    ) -> List[BacktestSeries]:
+        if returns.empty or weights.empty:
+            return []
+
+        ordered = weights.reindex(returns.columns).fillna(0.0)
+        optimized = self._equity_line_from_returns(returns, ordered, capital, "Optimized")
+
+        if returns.shape[1] == 0:
+            return [optimized]
+
+        equal_weights = pd.Series(1.0 / returns.shape[1], index=returns.columns)
+        equal_weight_line = self._equity_line_from_returns(returns, equal_weights, capital, "Equal Weight")
+        return [optimized, equal_weight_line]
+
+    def _equity_line_from_returns(
+        self,
+        returns: pd.DataFrame,
+        weights: pd.Series,
+        capital: float,
+        label: str,
+    ) -> BacktestSeries:
+        aligned = returns.reindex(columns=weights.index).fillna(0.0)
+        port_returns = aligned.to_numpy() @ weights.to_numpy().reshape((-1, 1))
+        compounded = np.cumprod(1.0 + port_returns.flatten())
+        values = capital * compounded
+        points = [
+            SeriesPoint(timestamp=pd.Timestamp(idx).to_pydatetime(), value=float(val))
+            for idx, val in zip(aligned.index, values)
+        ]
+        return BacktestSeries(label=label, points=points)
+
+    def _correlation_payload(self, returns: pd.DataFrame) -> OptimizerCorrelation | None:
+        if returns.empty or returns.shape[1] < 2:
+            return None
+        corr = returns.corr().fillna(0.0)
+        labels = list(corr.columns)
+        matrix = corr.to_numpy().tolist()
+        return OptimizerCorrelation(mode="returns", labels=labels, matrix=matrix)
 
 
 class RiskfolioJobManager:
