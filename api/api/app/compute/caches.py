@@ -16,6 +16,7 @@ from api.app.data.loader import LoadedTrades, load_trade_file
 class SeriesBundle:
     equity: pl.DataFrame
     daily_returns: pl.DataFrame
+    daily_percent: pl.DataFrame
     net_position: pl.DataFrame
     margin: pl.DataFrame
     spikes: pl.DataFrame
@@ -97,6 +98,48 @@ class PerFileCache:
             file_id=file_id,
         )
 
+    def daily_percent_returns(
+        self,
+        path: Path,
+        contract_multiplier: float | None = None,
+        margin_override: float | None = None,
+        direction: str | None = None,
+        loaded: LoadedTrades | None = None,
+        file_id: str | None = None,
+    ) -> pl.DataFrame:
+        """Canonical daily percent-return series.
+
+        This derives additive percent returns directly from the cached daily_returns
+        artifact so every downstream consumer (series endpoints, Riskfolio, etc.)
+        reads the exact same MTM session P&L and capital logic.
+        """
+        def builder(inner_loaded: LoadedTrades) -> pl.DataFrame:
+            daily = self.daily_returns(
+                path,
+                contract_multiplier=contract_multiplier,
+                margin_override=margin_override,
+                direction=direction,
+                loaded=inner_loaded,
+                file_id=file_id,
+            )
+            if daily.is_empty():
+                return pl.DataFrame(
+                    {"date": [], "session_start": [], "session_end": [], "pnl": [], "capital": [], "daily_return": [], "cum_pct": []}
+                )
+            ordered = daily.sort("date")
+            return ordered.with_columns(pl.col("daily_return").cum_sum().alias("cum_pct"))
+
+        return self._get_or_build(
+            path,
+            "daily_percent_returns",
+            builder,
+            contract_multiplier,
+            margin_override,
+            direction,
+            loaded=loaded,
+            file_id=file_id,
+        )
+
     def net_position(
         self,
         path: Path,
@@ -163,9 +206,13 @@ class PerFileCache:
         )
 
     def bundle(self, path: Path, loaded: LoadedTrades | None = None, file_id: str | None = None) -> SeriesBundle:
+        equity = self.equity_curve(path, loaded=loaded, file_id=file_id)
+        daily_returns = self.daily_returns(path, loaded=loaded, file_id=file_id)
+        daily_percent = self.daily_percent_returns(path, loaded=loaded, file_id=file_id)
         return SeriesBundle(
-            equity=self.equity_curve(path, loaded=loaded, file_id=file_id),
-            daily_returns=self.daily_returns(path, loaded=loaded, file_id=file_id),
+            equity=equity,
+            daily_returns=daily_returns,
+            daily_percent=daily_percent,
             net_position=self.net_position(path, loaded=loaded, file_id=file_id),
             margin=self.margin_usage(path, loaded=loaded, file_id=file_id),
             spikes=self.spike_overlay(path, loaded=loaded, file_id=file_id),
@@ -393,12 +440,18 @@ class PerFileCache:
                 rows.append(
                     {
                         "date": row["mtm_date"],
+                        "session_start": session_start,
+                        "session_end": session_end,
                         "pnl": pnl,
                         "capital": avg_capital,
                         "daily_return": daily_ret,
                     }
                 )
-            return pl.DataFrame(rows) if rows else pl.DataFrame({"date": [], "pnl": [], "capital": [], "daily_return": []})
+            if not rows:
+                return pl.DataFrame(
+                    {"date": [], "session_start": [], "session_end": [], "pnl": [], "capital": [], "daily_return": []}
+                )
+            return pl.DataFrame(rows)
 
         # Fallback: group by exit date if MTM absent.
         trades = trades.with_columns(pl.col("exit_time").dt.date().alias("date"))
@@ -411,7 +464,16 @@ class PerFileCache:
         )
         capital = grouped["contracts"].abs() * float(margin_value)
         daily_return = pl.when(capital > 0).then(grouped["pnl"] / capital).otherwise(0)
-        return grouped.drop("contracts").with_columns(capital=capital, daily_return=daily_return)
+        result = grouped.drop("contracts").with_columns(
+            capital=capital,
+            daily_return=daily_return,
+        )
+        # Best effort session bounds when MTM not available: default to start/end of calendar day.
+        result = result.with_columns(
+            pl.col("date").alias("session_start"),
+            (pl.col("date") + pl.duration(days=1) - pl.duration(seconds=1)).alias("session_end"),
+        )
+        return result.select("date", "session_start", "session_end", "pnl", "capital", "daily_return")
 
     def _compute_net_positions(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
         return self._netpos_intervals(
