@@ -6,8 +6,10 @@ from typing import Dict, Iterable, List, Tuple
 from uuid import uuid4
 
 from ..schemas import (
+    AllocationRow,
     CTARecord,
     CTAResponse,
+    ContractRow,
     CorrelationResponse,
     FileMetadata,
     SeriesContributor,
@@ -19,11 +21,13 @@ from ..schemas import (
     MetricsRow,
     OptimizerJobRequest,
     OptimizerJobResponse,
+    OptimizerSummary,
     Selection,
     SelectionMeta,
     SeriesPoint,
     SeriesResponse,
 )
+from ..constants import DEFAULT_ACCOUNT_EQUITY
 
 
 class InMemoryStore:

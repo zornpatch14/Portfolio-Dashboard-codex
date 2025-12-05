@@ -20,6 +20,7 @@ from uuid import uuid4
 
 import numpy as np
 
+import pandas as pd
 import polars as pl
 
 from fastapi import HTTPException, UploadFile, status
