@@ -194,16 +194,16 @@ export default function HomePage() {
   const [plotHistogramEnabled, setPlotHistogramEnabled] = useState<Record<string, boolean>>({});
 
   const [riskfolioMode, setRiskfolioMode] = useState<'mean-risk' | 'risk-parity' | 'hierarchical'>('mean-risk');
-  const [meanRiskObjective, setMeanRiskObjective] = useState('Sharpe');
-  const [meanRiskReturnModel, setMeanRiskReturnModel] = useState('arithmetic');
+  const [meanRiskObjective, setMeanRiskObjective] = useState('MinRisk');
+  const [meanRiskReturnModel, setMeanRiskReturnModel] = useState('approx');
   const [meanRiskReturnEstimate, setMeanRiskReturnEstimate] = useState('hist');
-  const [meanRiskRiskMeasure, setMeanRiskRiskMeasure] = useState('MV');
-  const [meanRiskCovariance, setMeanRiskCovariance] = useState('hist');
-  const [meanRiskRiskFree, setMeanRiskRiskFree] = useState(0);
+  const [meanRiskRiskMeasure, setMeanRiskRiskMeasure] = useState('CVaR');
+  const [meanRiskCovariance, setMeanRiskCovariance] = useState('ledoit');
+  const [meanRiskRiskFree, setMeanRiskRiskFree] = useState(5);
   const [meanRiskRiskAversion, setMeanRiskRiskAversion] = useState(2);
   const [meanRiskAlpha, setMeanRiskAlpha] = useState(0.05);
   const [meanRiskMinBound, setMeanRiskMinBound] = useState(0);
-  const [meanRiskMaxBound, setMeanRiskMaxBound] = useState(0.6);
+  const [meanRiskMaxBound, setMeanRiskMaxBound] = useState(1);
   const [meanRiskBudget, setMeanRiskBudget] = useState(1);
   const [meanRiskSymbolCaps, setMeanRiskSymbolCaps] = useState('');
   const [meanRiskStrategyCaps, setMeanRiskStrategyCaps] = useState('');
