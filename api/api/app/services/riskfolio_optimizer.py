@@ -55,6 +55,15 @@ class MeanRiskOptimizer:
         portfolio.lowerlng = settings.bounds.default_min
         portfolio.upperlng = settings.bounds.default_max
         portfolio.budget = settings.budget
+        if settings.min_return is not None:
+            portfolio.lowerret = settings.min_return
+        if settings.turnover_limit is not None:
+            portfolio.allowTO = True
+            portfolio.turnover = settings.turnover_limit
+        if settings.max_risk is not None:
+            limit_attr = self._risk_limit_attribute(rm_code)
+            if limit_attr:
+                setattr(portfolio, limit_attr, settings.max_risk)
 
         A, b = self._linear_constraints(metas, returns.columns.tolist(), settings)
         if A is not None and b is not None:
@@ -131,6 +140,16 @@ class MeanRiskOptimizer:
             "exact": "exact",
         }
         return mapping.get(label.lower(), None)
+
+    def _risk_limit_attribute(self, rm_code: str) -> str | None:
+        mapping = {
+            "MV": "upperdev",
+            "MSV": "uppersdev",
+            "CVaR": "upperCVaR",
+            "CDaR": "upperCDaR",
+            "EVaR": "upperEVaR",
+        }
+        return mapping.get(rm_code)
 
     def _linear_constraints(
         self,
