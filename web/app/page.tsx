@@ -331,25 +331,21 @@ export default function HomePage() {
 
 
 
+  const persistedSelectionPayload = useMemo(
+    () => ({ selection: activeSelection, includeDownsample }),
+    [activeSelection, includeDownsample],
+  );
+
   useEffect(() => {
-
     try {
-
-      const payload = JSON.stringify({ selection: activeSelection, includeDownsample });
-
+      // Persist only the canonical selection + downsample flag; sandbox equity stays ephemeral.
       if (typeof window !== 'undefined') {
-
-        localStorage.setItem(SELECTION_STORAGE_KEY, payload);
-
+        localStorage.setItem(SELECTION_STORAGE_KEY, JSON.stringify(persistedSelectionPayload));
       }
-
     } catch {
-
       // ignore write failures
-
     }
-
-  }, [activeSelection, includeDownsample]);
+  }, [persistedSelectionPayload]);
 
 
 
@@ -2573,7 +2569,7 @@ export default function HomePage() {
                 Apply Suggested Contracts
               </button>
             </div>
-            <div className="text-muted small" style={{ marginTop: 10 }}>
+            <div className="text-muted small" style={{ marginTop: 10 }} role="status" aria-live="polite">
               {riskfolioApplyMessage ||
                 (canApplyRiskfolio
                   ? 'Adjust the account equity to sandbox suggested contract counts before applying.'
