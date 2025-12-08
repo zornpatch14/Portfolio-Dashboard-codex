@@ -225,6 +225,18 @@ main {
   color: var(--text);
 }
 
+select.input {
+  appearance: none;
+  background-color: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+select.input option {
+  background-color: var(--panel);
+  color: var(--text);
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;

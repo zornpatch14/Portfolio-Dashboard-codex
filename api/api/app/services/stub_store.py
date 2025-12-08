@@ -6,8 +6,10 @@ from typing import Dict, Iterable, List, Tuple
 from uuid import uuid4
 
 from ..schemas import (
+    AllocationRow,
     CTARecord,
     CTAResponse,
+    ContractRow,
     CorrelationResponse,
     FileMetadata,
     SeriesContributor,
@@ -19,11 +21,13 @@ from ..schemas import (
     MetricsRow,
     OptimizerJobRequest,
     OptimizerJobResponse,
+    OptimizerSummary,
     Selection,
     SelectionMeta,
     SeriesPoint,
     SeriesResponse,
 )
+from ..constants import DEFAULT_ACCOUNT_EQUITY
 
 
 class InMemoryStore:
@@ -166,7 +170,7 @@ class InMemoryStore:
             status.progress = min(status.progress + 20, 100)
             if status.progress == 100:
                 status.status = "completed"
-                status.result = JobResult(weights={file_id: 1 / max(len(self.files), 1) for file_id in self.files})
+                status.result = JobResult()
         return status
 
     async def job_events(self, job_id: str) -> Iterable[str]:
@@ -176,7 +180,7 @@ class InMemoryStore:
             current.progress = step
             if step >= 100:
                 current.status = "completed"
-                current.result = JobResult(weights={file_id: 1 / max(len(self.files), 1) for file_id in self.files})
+                current.result = JobResult()
             event = JobEvent(job_id=job_id, status=current.status, progress=current.progress, message="heartbeat")
             yield f"data: {event.model_dump_json()}\n\n"
             await asyncio.sleep(0.1)
