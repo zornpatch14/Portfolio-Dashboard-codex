@@ -15,6 +15,7 @@ import pandas as pd
 import polars as pl
 
 from api.app.constants import DEFAULT_CONTRACT_MULTIPLIER, get_contract_spec, MARGIN_SPEC
+from api.app.utils.calendars import get_us_futures_calendar
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +101,9 @@ def _canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _parse_mtm_daily_sheet(xls: pd.ExcelFile, filename: str, symbol: str | None = None) -> pd.DataFrame:
-    """Extract the optional Daily MTM sheet."""
+    """Extract and densify the Daily MTM sheet using the US futures exchange calendar."""
+
+    empty_cols = ["File", "mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"]
 
     if "Daily" not in xls.sheet_names:
         logger.warning("MTM sheet 'Daily' missing in %s", os.path.basename(filename))
@@ -142,18 +145,42 @@ def _parse_mtm_daily_sheet(xls: pd.ExcelFile, filename: str, symbol: str | None 
     out["File"] = os.path.basename(filename)
     out = out.rename(columns={"Period": "mtm_date", "Net Profit": "mtm_net_profit"})
 
-    # Build explicit session bounds from symbol spec (defaults to 5pm prior -> 4:15pm current).
-    from api.app.constants import get_contract_spec
+    if out.empty:
+        return pd.DataFrame(columns=empty_cols)
 
-    spec = get_contract_spec(symbol or "")
-    out["mtm_session_start"] = out["mtm_date"] + pd.Timedelta(days=spec.session_start_day_offset) + pd.Timedelta(
-        hours=spec.session_start_hour, minutes=spec.session_start_minute
-    )
-    out["mtm_session_end"] = out["mtm_date"] + pd.Timedelta(days=spec.session_end_day_offset) + pd.Timedelta(
-        hours=spec.session_end_hour, minutes=spec.session_end_minute
+    start_date = out["mtm_date"].min()
+    end_date = out["mtm_date"].max()
+    if pd.isna(start_date) or pd.isna(end_date):
+        return pd.DataFrame(columns=empty_cols)
+
+    cal = get_us_futures_calendar()
+    schedule = cal.schedule(start_date=start_date, end_date=end_date)
+    if schedule.empty:
+        return pd.DataFrame(columns=empty_cols)
+
+    def _to_naive_index(values: pd.Index | pd.Series) -> pd.DatetimeIndex:
+        idx = pd.DatetimeIndex(values)
+        if idx.tz is not None:
+            idx = idx.tz_convert("UTC").tz_localize(None)
+        return idx
+
+    session_index = _to_naive_index(schedule.index).normalize()
+    session_opens = _to_naive_index(schedule["open"])
+    session_closes = _to_naive_index(schedule["close"])
+
+    schedule_frame = pd.DataFrame(
+        {
+            "mtm_date": session_index,
+            "mtm_session_start": session_opens,
+            "mtm_session_end": session_closes,
+        }
     )
 
-    return out[["File", "mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"]]
+    merged = schedule_frame.merge(out[["mtm_date", "mtm_net_profit"]], on="mtm_date", how="left")
+    merged["mtm_net_profit"] = merged["mtm_net_profit"].fillna(0.0)
+    merged["File"] = os.path.basename(filename)
+    merged = merged.sort_values("mtm_date").reset_index(drop=True)
+    return merged[["File", "mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"]]
 
 
 def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFrame]:
