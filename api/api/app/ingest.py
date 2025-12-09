@@ -491,6 +491,8 @@ class IngestService:
         trades_df, mtm_df = parse_tradestation_trades(xlsx_path)
         if trades_df.is_empty():
             raise ValueError(f"No trades parsed from {xlsx_path.name}")
+        if mtm_df.is_empty():
+            raise ValueError(f"No MTM (Daily P&L) data found in {xlsx_path.name}")
 
         file_hash = _sha256_file(xlsx_path)
         file_id = file_hash[:12]

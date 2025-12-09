@@ -330,63 +330,59 @@ class PerFileCache:
         cmult = contract_multiplier if contract_multiplier is not None else self.default_contract_multiplier
         trades = self._filter_by_direction(loaded.trades, direction)
         trades = self._apply_contract_multiplier(trades, cmult)
-        # Try MTM-driven equity first
         mtm_df = self.load_mtm(loaded.path, loaded.file_id)
-        if not mtm_df.is_empty():
-            mtm_df = self._scale_mtm_profits(mtm_df, cmult)
-            # Stepwise equity: open at session start, close at session end with MTM P&L applied.
-            mtm_df = mtm_df.sort("mtm_date")
-            equity_points = []
-            running = self.starting_equity
-            for row in mtm_df.iter_rows(named=True):
-                session_start = row.get("mtm_session_start") or row["mtm_date"]
-                session_end = row.get("mtm_session_end") or row["mtm_date"]
-                equity_points.append({"timestamp": session_start, "equity": running})
-                running = running + float(row["mtm_net_profit"])
-                equity_points.append({"timestamp": session_end, "equity": running})
+        if mtm_df.is_empty():
+            file_label = loaded.file_id or loaded.path.stem
+            raise ValueError(f"MTM data missing for file {file_label}; re-ingest trades with Daily MTM data.")
 
-            equity_df = pl.DataFrame(equity_points).sort("timestamp")
+        mtm_df = self._scale_mtm_profits(mtm_df, cmult)
+        # Stepwise equity: open at session start, close at session end with MTM P&L applied.
+        mtm_df = mtm_df.sort("mtm_date")
+        equity_points = []
+        running = self.starting_equity
+        for row in mtm_df.iter_rows(named=True):
+            session_start = row.get("mtm_session_start") or row["mtm_date"]
+            session_end = row.get("mtm_session_end") or row["mtm_date"]
+            equity_points.append({"timestamp": session_start, "equity": running})
+            running = running + float(row["mtm_net_profit"])
+            equity_points.append({"timestamp": session_end, "equity": running})
 
-            # Optional snap to trade exits: align cumulative trade P&L on exit sessions.
-            trades = trades.sort(["exit_time", "entry_time", "trade_no"])
-            if not trades.is_empty():
-                cum_trade = trades["net_profit"].cum_sum()
-                trades = trades.with_columns(cum_trade.alias("cum_trade_pl"))
-                # Snap by matching exit_date to mtm_date.
-                for row in trades.iter_rows(named=True):
-                    exit_time = row["exit_time"]
-                    if exit_time is None:
-                        continue
-                    exit_date = pl.Series([exit_time]).dt.date()[0]
-                    match = mtm_df.filter(pl.col("mtm_date") == exit_date)
-                    if match.is_empty():
-                        continue
-                    # Find the session end point index
-                    session_end = match["mtm_session_end"][0]
-                    idx = equity_df.get_column("timestamp").to_list().index(session_end) if session_end in equity_df["timestamp"].to_list() else None
-                    if idx is not None:
-                        equity_df = equity_df.with_row_count()
-                        target_idx = equity_df.filter(pl.col("timestamp") == session_end)["row_nr"][0]
-                        delta = row["cum_trade_pl"] + self.starting_equity - equity_df.filter(pl.col("timestamp") == session_end)["equity"][0]
-                        if delta != 0:
-                            equity_df = equity_df.with_columns(
-                                pl.when(pl.col("row_nr") >= target_idx)
-                                .then(pl.col("equity") + delta)
-                                .otherwise(pl.col("equity"))
-                                .alias("equity")
-                            ).drop("row_nr")
-                        else:
-                            equity_df = equity_df.drop("row_nr")
-                    else:
-                        continue
+        equity_df = pl.DataFrame(equity_points).sort("timestamp")
 
-            return equity_df
-
-        # Fallback: trade-based equity
+        # Optional snap to trade exits: align cumulative trade P&L on exit sessions.
         trades = trades.sort(["exit_time", "entry_time", "trade_no"])
-        cumulative = trades["net_profit"].cum_sum()
-        equity = cumulative + self.starting_equity
-        return pl.DataFrame({"timestamp": trades["exit_time"], "equity": equity})
+        if not trades.is_empty():
+            cum_trade = trades["net_profit"].cum_sum()
+            trades = trades.with_columns(cum_trade.alias("cum_trade_pl"))
+            # Snap by matching exit_date to mtm_date.
+            for row in trades.iter_rows(named=True):
+                exit_time = row["exit_time"]
+                if exit_time is None:
+                    continue
+                exit_date = pl.Series([exit_time]).dt.date()[0]
+                match = mtm_df.filter(pl.col("mtm_date") == exit_date)
+                if match.is_empty():
+                    continue
+                # Find the session end point index
+                session_end = match["mtm_session_end"][0]
+                idx = equity_df.get_column("timestamp").to_list().index(session_end) if session_end in equity_df["timestamp"].to_list() else None
+                if idx is not None:
+                    equity_df = equity_df.with_row_count()
+                    target_idx = equity_df.filter(pl.col("timestamp") == session_end)["row_nr"][0]
+                    delta = row["cum_trade_pl"] + self.starting_equity - equity_df.filter(pl.col("timestamp") == session_end)["equity"][0]
+                    if delta != 0:
+                        equity_df = equity_df.with_columns(
+                            pl.when(pl.col("row_nr") >= target_idx)
+                            .then(pl.col("equity") + delta)
+                            .otherwise(pl.col("equity"))
+                            .alias("equity")
+                        ).drop("row_nr")
+                    else:
+                        equity_df = equity_df.drop("row_nr")
+                else:
+                    continue
+
+        return equity_df
 
     def _compute_daily_returns(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
         cmult = contract_multiplier if contract_multiplier is not None else self.default_contract_multiplier
@@ -395,85 +391,66 @@ class PerFileCache:
         mtm_df = self.load_mtm(loaded.path, loaded.file_id)
 
         # Use MTM sessions when available.
-        if not mtm_df.is_empty():
-            mtm_df = self._scale_mtm_profits(mtm_df, cmult)
-            mtm_df = mtm_df.sort("mtm_date")
-            last_session_end = mtm_df["mtm_session_end"].max() if "mtm_session_end" in mtm_df.columns else None
-            _, intervals = self._netpos_intervals(
-                loaded,
-                contract_multiplier=contract_multiplier,
-                margin_override=margin_override,
-                end_override=last_session_end,
-                trades_override=trades,
-                direction=direction,
-            )
-            rows = []
-            for row in mtm_df.iter_rows(named=True):
-                session_start = row.get("mtm_session_start") or row["mtm_date"]
-                session_end = row.get("mtm_session_end") or row["mtm_date"]
-                pnl = float(row["mtm_net_profit"])
-                # Overlap intervals with session to compute avg open-position margin.
-                overlap = intervals.filter(
-                    (pl.col("start") < session_end) & (pl.col("end") > session_start)
-                )
-                if overlap.is_empty():
-                    avg_capital = 0.0
-                else:
-                    caps = []
-                    mins = []
-                    for iv in overlap.iter_rows(named=True):
-                        s = max(iv["start"], session_start)
-                        e = min(iv["end"], session_end)
-                        if s >= e:
-                            continue
-                        minutes = (e - s).total_seconds() / 60.0
-                        if iv["net_position"] == 0:
-                            continue
-                        caps.append(iv["margin_used"])
-                        mins.append(minutes)
-                    if caps and mins and sum(mins) > 0:
-                        # Weighted average by minutes open.
-                        avg_capital = sum(c * m for c, m in zip(caps, mins)) / sum(mins)
-                    else:
-                        avg_capital = 0.0
-                daily_ret = (pnl / avg_capital) if avg_capital > 0 else 0.0
-                rows.append(
-                    {
-                        "date": row["mtm_date"],
-                        "session_start": session_start,
-                        "session_end": session_end,
-                        "pnl": pnl,
-                        "capital": avg_capital,
-                        "daily_return": daily_ret,
-                    }
-                )
-            if not rows:
-                return pl.DataFrame(
-                    {"date": [], "session_start": [], "session_end": [], "pnl": [], "capital": [], "daily_return": []}
-                )
-            return pl.DataFrame(rows)
+        if mtm_df.is_empty():
+            file_label = loaded.file_id or loaded.path.stem
+            raise ValueError(f"MTM data missing for file {file_label}; re-ingest trades with Daily MTM data.")
 
-        # Fallback: group by exit date if MTM absent.
-        trades = trades.with_columns(pl.col("exit_time").dt.date().alias("date"))
-        margin_value = margin_override or self.margin_per_contract
-        if margin_value is None:
-            margin_value = float(trades["margin_per_contract"].max()) if "margin_per_contract" in trades.columns else DEFAULT_MARGIN_PER_CONTRACT
-        grouped = trades.group_by("date").agg(
-            pnl=pl.col("net_profit").sum(),
-            contracts=pl.col("contracts").sum(),
+        mtm_df = self._scale_mtm_profits(mtm_df, cmult)
+        mtm_df = mtm_df.sort("mtm_date")
+        last_session_end = mtm_df["mtm_session_end"].max() if "mtm_session_end" in mtm_df.columns else None
+        _, intervals = self._netpos_intervals(
+            loaded,
+            contract_multiplier=contract_multiplier,
+            margin_override=margin_override,
+            end_override=last_session_end,
+            trades_override=trades,
+            direction=direction,
         )
-        capital = grouped["contracts"].abs() * float(margin_value)
-        daily_return = pl.when(capital > 0).then(grouped["pnl"] / capital).otherwise(0)
-        result = grouped.drop("contracts").with_columns(
-            capital=capital,
-            daily_return=daily_return,
-        )
-        # Best effort session bounds when MTM not available: default to start/end of calendar day.
-        result = result.with_columns(
-            pl.col("date").alias("session_start"),
-            (pl.col("date") + pl.duration(days=1) - pl.duration(seconds=1)).alias("session_end"),
-        )
-        return result.select("date", "session_start", "session_end", "pnl", "capital", "daily_return")
+        rows = []
+        for row in mtm_df.iter_rows(named=True):
+            session_start = row.get("mtm_session_start") or row["mtm_date"]
+            session_end = row.get("mtm_session_end") or row["mtm_date"]
+            pnl = float(row["mtm_net_profit"])
+            # Overlap intervals with session to compute avg open-position margin.
+            overlap = intervals.filter(
+                (pl.col("start") < session_end) & (pl.col("end") > session_start)
+            )
+            if overlap.is_empty():
+                avg_capital = 0.0
+            else:
+                caps = []
+                mins = []
+                for iv in overlap.iter_rows(named=True):
+                    s = max(iv["start"], session_start)
+                    e = min(iv["end"], session_end)
+                    if s >= e:
+                        continue
+                    minutes = (e - s).total_seconds() / 60.0
+                    if iv["net_position"] == 0:
+                        continue
+                    caps.append(iv["margin_used"])
+                    mins.append(minutes)
+                if caps and mins and sum(mins) > 0:
+                    # Weighted average by minutes open.
+                    avg_capital = sum(c * m for c, m in zip(caps, mins)) / sum(mins)
+                else:
+                    avg_capital = 0.0
+            daily_ret = (pnl / avg_capital) if avg_capital > 0 else 0.0
+            rows.append(
+                {
+                    "date": row["mtm_date"],
+                    "session_start": session_start,
+                    "session_end": session_end,
+                    "pnl": pnl,
+                    "capital": avg_capital,
+                    "daily_return": daily_ret,
+                }
+            )
+        if not rows:
+            return pl.DataFrame(
+                {"date": [], "session_start": [], "session_end": [], "pnl": [], "capital": [], "daily_return": []}
+            )
+        return pl.DataFrame(rows)
 
     def _compute_net_positions(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
         return self._netpos_intervals(
