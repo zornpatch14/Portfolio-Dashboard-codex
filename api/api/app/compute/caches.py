@@ -51,12 +51,12 @@ class PerFileCache:
         # Expect layout: .../parquet/trades/<file_id>.parquet -> mtm at .../parquet/mtm/<file_id>.parquet
         mtm_dir = trades_path.parent.parent / "mtm"
         mtm_path = mtm_dir / f"{file_id}.parquet"
-        if mtm_path.exists():
-            try:
-                return pl.read_parquet(mtm_path)
-            except Exception:
-                return pl.DataFrame({"mtm_date": [], "mtm_net_profit": [], "mtm_session_start": [], "mtm_session_end": []})
-        return pl.DataFrame({"mtm_date": [], "mtm_net_profit": [], "mtm_session_start": [], "mtm_session_end": []})
+        if not mtm_path.exists():
+            raise ValueError(f"Missing MTM parquet for file {file_id}; re-ingest the source trades.")
+        try:
+            return pl.read_parquet(mtm_path)
+        except Exception as exc:
+            raise ValueError(f"Unable to read MTM parquet for file {file_id}: {exc}") from exc
 
     def equity_curve(
         self,
@@ -392,8 +392,16 @@ class PerFileCache:
 
         # Use MTM sessions when available.
         if mtm_df.is_empty():
-            file_label = loaded.file_id or loaded.path.stem
-            raise ValueError(f"MTM data missing for file {file_label}; re-ingest trades with Daily MTM data.")
+            return pl.DataFrame(
+                {
+                    "date": [],
+                    "session_start": [],
+                    "session_end": [],
+                    "pnl": [],
+                    "capital": [],
+                    "daily_return": [],
+                }
+            )
 
         mtm_df = self._scale_mtm_profits(mtm_df, cmult)
         mtm_df = mtm_df.sort("mtm_date")
