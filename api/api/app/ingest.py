@@ -154,7 +154,7 @@ def _parse_mtm_daily_sheet(xls: pd.ExcelFile, filename: str, symbol: str | None 
         return pd.DataFrame(columns=empty_cols)
 
     cal = get_us_futures_calendar()
-    schedule = cal.schedule(start_date=start_date, end_date=end_date)
+    schedule = cal.schedule.loc[start_date:end_date]
     if schedule.empty:
         return pd.DataFrame(columns=empty_cols)
 
