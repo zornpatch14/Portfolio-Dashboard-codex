@@ -226,7 +226,7 @@ export default function HomePage() {
 
   const [corrMode, setCorrMode] = useState('drawdown_pct');
 
-  const [includeDownsample, setIncludeDownsample] = useState(true);
+  const [includeDownsample, setIncludeDownsample] = useState(false);
 
   const [exportFormat, setExportFormat] = useState<'csv' | 'parquet'>('parquet');
 
