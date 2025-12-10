@@ -1,0 +1,15 @@
+ [build-system]
+ requires = ["setuptools>=64"]
+ build-backend = "setuptools.build_meta"
+
+[project]
+name = "portfolio-dashboard-api"
+version = "0.1.0"
+description = "Backend services for the Portfolio Dashboard project."
+requires-python = ">=3.11"
+
+ [tool.setuptools]
+ package-dir = {"" = "api"}
+
+ [tool.setuptools.packages.find]
+ where = ["api"]
