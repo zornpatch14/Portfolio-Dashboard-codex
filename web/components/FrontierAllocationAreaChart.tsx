@@ -27,7 +27,7 @@ export function FrontierAllocationAreaChart({ series, selectedIndex, onSelect }:
     if (!ref.current) return undefined;
     const chart = echarts.init(ref.current);
 
-    const chartSeries = series.map((line) => ({
+    const chartSeries: echarts.SeriesOption[] = series.map((line) => ({
       name: line.asset,
       type: 'line' as const,
       stack: 'weights',
