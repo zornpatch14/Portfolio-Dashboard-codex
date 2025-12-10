@@ -336,14 +336,18 @@ class PerFileCache:
             raise ValueError(f"MTM data missing for file {file_label}; re-ingest trades with Daily MTM data.")
 
         mtm_df = self._scale_mtm_profits(mtm_df, cmult)
-        # Stepwise equity: open at session start, close at session end with MTM P&L applied.
-        mtm_df = mtm_df.sort("mtm_date")
+        # Build a single closing point per MTM session so downstream charts receive one datum per date.
+        sort_cols: list[str] = ["mtm_date"]
+        if "mtm_session_end" in mtm_df.columns:
+            sort_cols.append("mtm_session_end")
+        mtm_df = mtm_df.sort(sort_cols)
         equity_points = []
         running = self.starting_equity
+        anchor_ts = mtm_df["mtm_session_start"][0] if "mtm_session_start" in mtm_df.columns else None
+        if anchor_ts is not None:
+            equity_points.append({"timestamp": anchor_ts, "equity": running})
         for row in mtm_df.iter_rows(named=True):
-            session_start = row.get("mtm_session_start") or row["mtm_date"]
             session_end = row.get("mtm_session_end") or row["mtm_date"]
-            equity_points.append({"timestamp": session_start, "equity": running})
             running = running + float(row["mtm_net_profit"])
             equity_points.append({"timestamp": session_end, "equity": running})
 
