@@ -1128,8 +1128,9 @@ class DataStore:
         """
         Assemble a pandas DataFrame of per-file daily returns suitable for Riskfolio.
 
-        Columns map to file ids; index is the trading date. Missing values (no trades
-        on a given date) are filled with 0 so Riskfolio receives a dense matrix.
+        Columns map to file ids; index is the trading date. MTM ingestion densities each
+        series across its active range, so the resulting frame is already aligned on the
+        common calendar without padding or synthetic fills.
         """
         metas = self._metas_for_selection(selection)
         if not metas:
@@ -1175,7 +1176,6 @@ class DataStore:
             return pd.DataFrame(), metas
 
         combined = pd.concat(series, axis=1, join="outer").sort_index()
-        combined = combined.fillna(0.0)
         return combined, metas
 
 store = DataStore()

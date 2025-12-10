@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Dict, Iterable, List
+from typing import AsyncGenerator, Dict, Iterable, List
 from uuid import uuid4
 
 import numpy as np
@@ -445,7 +445,7 @@ class RiskfolioJobManager:
             raise KeyError(job_id)
         return self.jobs[job_id]
 
-    async def job_events(self, job_id: str) -> Iterable[str]:
+    async def job_events(self, job_id: str) -> AsyncGenerator[str, None]:
         status = self.job_status(job_id)
         event = JobEvent(
             job_id=job_id,

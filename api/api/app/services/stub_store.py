@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta
-from typing import Dict, Iterable, List, Tuple
+from typing import AsyncGenerator, Dict, Iterable, List, Tuple
 from uuid import uuid4
 
 from ..schemas import (
@@ -173,7 +173,7 @@ class InMemoryStore:
                 status.result = JobResult()
         return status
 
-    async def job_events(self, job_id: str) -> Iterable[str]:
+    async def job_events(self, job_id: str) -> AsyncGenerator[str, None]:
         status = self.job_status(job_id)
         for step in range(status.progress, 101, 20):
             current = self.jobs[job_id]

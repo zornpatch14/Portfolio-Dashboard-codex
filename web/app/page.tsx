@@ -1601,17 +1601,85 @@ export default function HomePage() {
 
   const purchasingPowerLines = useMemo(() => {
 
-    const timeline = Array.from(
+    const buildTimeline = (left: { timestamp: string }[], right: { timestamp: string }[]) =>
 
-      new Set([
+      Array.from(
 
-        ...equityLines.portfolio.map((p) => p.timestamp),
+        new Set([
 
-        ...marginLines.portfolio.map((p) => p.timestamp),
+          ...left.map((p) => p.timestamp),
 
-      ]),
+          ...right.map((p) => p.timestamp),
 
-    ).sort();
+        ]),
+
+      ).sort();
+
+
+
+    const buildStepper = (points: { timestamp: string; value: number }[], fallback: number) => {
+
+      if (!points.length) {
+
+        return () => fallback;
+
+      }
+
+      const sorted = [...points].sort((a, b) => {
+
+        if (a.timestamp === b.timestamp) return 0;
+
+        return a.timestamp < b.timestamp ? -1 : 1;
+
+      });
+
+      let idx = 0;
+
+      let last = fallback;
+
+      return (ts: string) => {
+
+        while (idx < sorted.length && sorted[idx].timestamp <= ts) {
+
+          last = sorted[idx].value;
+
+          idx += 1;
+
+        }
+
+        return last;
+
+      };
+
+    };
+
+
+
+    const buildSeries = (
+
+      equityPts: { timestamp: string; value: number }[],
+
+      marginPts: { timestamp: string; value: number }[],
+
+    ) => {
+
+      const timeline = buildTimeline(equityPts, marginPts);
+
+      const equityAt = buildStepper(equityPts, accountEquity);
+
+      const marginAt = buildStepper(marginPts, 0);
+
+      return timeline.map((ts) => {
+
+        const equityVal = equityAt(ts);
+
+        const marginVal = marginAt(ts);
+
+        return { timestamp: ts, value: equityVal - marginVal };
+
+      });
+
+    };
 
 
 
@@ -1619,33 +1687,15 @@ export default function HomePage() {
 
       const margin = marginLines.perFile.find((m) => m.name === eq.name);
 
-      const points = timeline.map((ts) => {
+      const marginPoints = margin?.points ?? [];
 
-        const equityVal = eq.points.find((p) => p.timestamp === ts)?.value ?? 0;
-
-        const marginVal = margin?.points.find((p) => p.timestamp === ts)?.value ?? 0;
-
-        const value = accountEquity + equityVal - marginVal;
-
-        return { timestamp: ts, value };
-
-      });
-
-      return { name: eq.name, points };
+      return { name: eq.name, points: buildSeries(eq.points, marginPoints) };
 
     });
 
 
 
-    const portfolioPoints = timeline.map((ts) => {
-
-      const equityVal = equityLines.portfolio.find((p) => p.timestamp === ts)?.value ?? 0;
-
-      const marginVal = marginLines.portfolio.find((p) => p.timestamp === ts)?.value ?? 0;
-
-      return { timestamp: ts, value: accountEquity + equityVal - marginVal };
-
-    });
+    const portfolioPoints = buildSeries(equityLines.portfolio, marginLines.portfolio);
 
 
 
