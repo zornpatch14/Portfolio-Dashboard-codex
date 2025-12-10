@@ -377,6 +377,20 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
         if "entry_time" in trades_df.columns:
             trades_df["entry_time"] = pd.to_datetime(trades_df["entry_time"], errors="coerce")
 
+        if "exit_time" in trades_df.columns:
+            # Store the timestamp exactly as provided before applying the minimum-bar adjustment.
+            trades_df["raw_exit_time"] = trades_df["exit_time"]
+            interval_minutes = interval if interval and interval > 0 else None
+            # Fall back to a single-minute bar when interval is missing so zero-duration trades still extend.
+            min_bar_delta = pd.Timedelta(minutes=interval_minutes or 1)
+            if "entry_time" in trades_df.columns:
+                mask = (
+                    trades_df["exit_time"].notna()
+                    & trades_df["entry_time"].notna()
+                    & (trades_df["exit_time"] <= trades_df["entry_time"])
+                )
+                trades_df.loc[mask, "exit_time"] = trades_df.loc[mask, "entry_time"] + min_bar_delta
+
         num_cols = [
             "net_profit",
             "runup",
