@@ -212,7 +212,7 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
         pct_series = (
             df["% Profit"].astype(str).str.replace(",", "", regex=False).str.replace("%", "", regex=False).str.strip()
         )
-        df["% Profit"] = pd.to_numeric(pct_series, errors="coerce") / 100.0
+        df["% Profit"] = pd.to_numeric(pct_series, errors="coerce")
 
     entry_types = {"Buy", "Sell Short"}
     exit_types = {"Sell", "Buy to Cover"}
