@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ..dependencies import get_selection
 from ..schemas import CorrelationResponse
-from ..services.stub_store import store
 
 router = APIRouter(prefix="/api/v1", tags=["correlations"])
 
@@ -17,4 +16,7 @@ async def correlations(
         description="Correlation mode (returns, drawdown_pct, pl, slope)",
     ),
 ) -> CorrelationResponse:
-    return store.correlations(selection, mode)
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Correlations endpoint coming soon.",
+    )
