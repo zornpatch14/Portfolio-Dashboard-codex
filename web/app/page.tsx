@@ -1715,9 +1715,7 @@ export default function HomePage() {
 
         maxSoFar = Math.max(maxSoFar, p.value);
 
-        const dd = maxSoFar === 0 ? 0 : ((p.value - maxSoFar) / maxSoFar) * 100;
-
-        return { ...p, value: dd };
+        return { ...p, value: p.value - maxSoFar };
 
       });
 
@@ -1732,6 +1730,24 @@ export default function HomePage() {
     };
 
   }, [purchasingPowerLines]);
+
+
+
+  const purchasingPowerDrawdownReferenceLine = useMemo(() => {
+
+    const base = accountEquity ? accountEquity * -1 : 0;
+
+    if (!base || !purchasingPowerDrawdownLines.portfolio.length) return [];
+
+    return purchasingPowerDrawdownLines.portfolio.map((point) => ({
+
+      timestamp: point.timestamp,
+
+      value: base,
+
+    }));
+
+  }, [accountEquity, purchasingPowerDrawdownLines.portfolio]);
 
 
 
@@ -3406,15 +3422,21 @@ const renderCta = () => (
 
         <EquityMultiChart
 
-          title="Purchasing Power Drawdown (%)"
+          title="Purchasing Power Drawdown ($)"
 
-          description="Purchasing Power Drawdown (percentage from peak)"
+          description="Purchasing Power Drawdown (dollars from peak)"
 
           series={[
 
             ...purchasingPowerDrawdownLines.perFile.filter((s) => plotMarginEnabled[s.name] !== false),
 
             ...(plotMarginEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: purchasingPowerDrawdownLines.portfolio }]),
+
+            ...(purchasingPowerDrawdownReferenceLine.length
+
+              ? [{ name: 'Account Equity', points: purchasingPowerDrawdownReferenceLine }]
+
+              : []),
 
           ]}
 
