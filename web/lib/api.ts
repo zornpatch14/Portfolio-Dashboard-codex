@@ -79,6 +79,10 @@ export type HistogramBucket = {
 
   count: number;
 
+  start_value: number;
+
+  end_value: number;
+
 };
 
 
@@ -609,13 +613,31 @@ export function mockHistogram(selection: Selection): HistogramResponse {
 
   const buckets: HistogramBucket[] = [];
 
-  for (let i = -6; i <= 8; i += 1) {
+  const bucketSize = 5000;
 
-    buckets.push({ bucket: `${i * 10}%`, count: Math.max(1, Math.round(rand() * 120)) });
+  for (let i = -6; i < 9; i += 1) {
+
+    const start = i * bucketSize;
+
+    const end = start + bucketSize;
+
+    const label = `$${start.toLocaleString()} to $${end.toLocaleString()}`;
+
+    buckets.push({
+
+      bucket: label,
+
+      count: Math.max(1, Math.round(rand() * 120)),
+
+      start_value: start,
+
+      end_value: end,
+
+    });
 
   }
 
-  return { label: `Return distribution (${selection.name})`, buckets };
+  return { label: `PnL distribution (${selection.name})`, buckets };
 
 }
 

@@ -140,6 +140,10 @@ class HistogramBucket(BaseModel):
 
     count: int
 
+    start_value: float
+
+    end_value: float
+
 
 
 

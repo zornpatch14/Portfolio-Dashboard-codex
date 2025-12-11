@@ -101,6 +101,19 @@ const formatCurrency = (value: number | null | undefined) => {
   return `$${value.toLocaleString()}`;
 };
 
+const formatHistogramDollar = (value: number) =>
+  `$${value.toLocaleString(undefined, { maximumFractionDigits: 0, minimumFractionDigits: 0 })}`;
+
+const formatHistogramDollarRange = (start: number, end: number) =>
+  `${formatHistogramDollar(start)} to ${formatHistogramDollar(end)}`;
+
+const formatHistogramPercentRange = (start: number, end: number, equity: number) => {
+  if (!equity) return '0.0% to 0.0%';
+  const startPct = (start / equity) * 100;
+  const endPct = (end / equity) * 100;
+  return `${startPct.toFixed(1)}% to ${endPct.toFixed(1)}%`;
+};
+
 const parseOptionalNumber = (raw: string): number | null => {
   if (!raw.trim()) return null;
   const parsed = Number(raw);
@@ -1798,8 +1811,6 @@ export default function HomePage() {
     const names = new Set<string>();
 
     histogramData.forEach((h) => names.add(h.name));
-
-    names.add('Portfolio');
 
     setPlotHistogramEnabled((prev) => {
 
@@ -3500,7 +3511,7 @@ const renderCta = () => (
 
         <div className="chips" style={{ marginTop: 10, flexWrap: 'wrap' }}>
 
-          {[...histogramData.map((h) => h.name), 'Portfolio'].map((name) => {
+          {histogramData.map((h) => h.name).map((name) => {
 
             const active = plotHistogramEnabled[name] ?? true;
 
@@ -3536,49 +3547,43 @@ const renderCta = () => (
 
         const activeHists = histogramData.filter((h) => plotHistogramEnabled[h.name] !== false);
 
-        const bucketOrder = (activeHists[0]?.buckets ?? []).map((bucketItem) => bucketItem.bucket);
+        const baseBuckets = activeHists[0]?.buckets ?? [];
 
-        const bucketMap = new Map(bucketOrder.map((b) => [b, 0]));
+        const aggregatedBuckets = baseBuckets.map((bucket) => {
 
-        activeHists.forEach((hist) => {
+          const totalCount = activeHists.reduce((sum, hist) => {
 
-          hist.buckets.forEach((bucket) => {
+            const match = hist.buckets.find(
 
-            bucketMap.set(bucket.bucket, (bucketMap.get(bucket.bucket) || 0) + bucket.count);
+              (candidate) =>
 
-          });
+                candidate.start_value === bucket.start_value && candidate.end_value === bucket.end_value,
+
+            );
+
+            return sum + (match?.count ?? 0);
+
+          }, 0);
+
+          return { ...bucket, count: totalCount };
 
         });
 
-        const parsePct = (label: string) => {
+        const portfolioBucketsDollar = aggregatedBuckets.map((bucket) => ({
 
-          const cleaned = label.replace('%', '');
+          ...bucket,
 
-          const val = Number.parseFloat(cleaned);
-
-          return Number.isFinite(val) ? val : 0;
-
-        };
-
-        const portfolioBuckets = bucketOrder.map((bucket) => ({
-
-          bucket,
-
-          count: bucketMap.get(bucket) || 0,
+          bucket: formatHistogramDollarRange(bucket.start_value, bucket.end_value),
 
         }));
 
-        const portfolioBucketsDollar = bucketOrder.map((bucket) => {
+        const portfolioBucketsPercent = aggregatedBuckets.map((bucket) => ({
 
-          const pct = parsePct(bucket);
+          ...bucket,
 
-          const dollars = (pct / 100) * accountEquity;
+          bucket: formatHistogramPercentRange(bucket.start_value, bucket.end_value, accountEquity),
 
-          const label = dollars >= 0 ? `$${dollars.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : `-$${Math.abs(dollars).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-
-          return { bucket: label, count: bucketMap.get(bucket) || 0 };
-
-        });
+        }));
 
         return (
 
@@ -3610,9 +3615,9 @@ const renderCta = () => (
 
               </div>
 
-              <HistogramChart histogram={{ label: 'Portfolio Histogram (%)', buckets: portfolioBuckets }} />
+              <HistogramChart histogram={{ label: 'Portfolio Histogram (%)', buckets: portfolioBucketsPercent }} />
 
-              <div className="text-muted small" style={{ marginTop: 8 }}>Buckets: {portfolioBuckets.length}</div>
+              <div className="text-muted small" style={{ marginTop: 8 }}>Buckets: {portfolioBucketsPercent.length}</div>
 
             </div>
 

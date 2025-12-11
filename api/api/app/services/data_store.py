@@ -971,7 +971,7 @@ class DataStore:
 
 
 
-    def histogram(self, selection: Selection, bins: int = 20) -> HistogramResponse:
+    def histogram(self, selection: Selection, bins: int = 16) -> HistogramResponse:
 
         view = self._view_for_selection(selection)
 
@@ -985,19 +985,40 @@ class DataStore:
 
 
 
-        values = returns["daily_return"].to_numpy()
+        values = returns["pnl"].to_numpy()
 
-        hist, edges = np.histogram(values, bins=bins)
+        max_abs = float(np.max(np.abs(values)))
+        if max_abs == 0:
+            edges = np.linspace(-1, 1, bins + 1)
+        else:
+            edges = np.linspace(-max_abs, max_abs, bins + 1)
+        hist, _ = np.histogram(values, bins=edges)
 
+        def _format_range(start: float, end: float) -> str:
 
+            return f"${start:,.2f} to ${end:,.2f}"
 
         buckets: list[HistogramBucket] = []
 
         for count, start, end in zip(hist, edges[:-1], edges[1:]):
 
-            label = f"{start * 100:.2f}% to {end * 100:.2f}%"
+            label = _format_range(float(start), float(end))
 
-            buckets.append(HistogramBucket(bucket=label, count=int(count)))
+            buckets.append(
+
+                HistogramBucket(
+
+                    bucket=label,
+
+                    count=int(count),
+
+                    start_value=float(start),
+
+                    end_value=float(end),
+
+                )
+
+            )
 
 
 
