@@ -1799,8 +1799,6 @@ export default function HomePage() {
 
     histogramData.forEach((h) => names.add(h.name));
 
-    names.add('Portfolio');
-
     setPlotHistogramEnabled((prev) => {
 
       const next = { ...prev };
@@ -3500,7 +3498,7 @@ const renderCta = () => (
 
         <div className="chips" style={{ marginTop: 10, flexWrap: 'wrap' }}>
 
-          {[...histogramData.map((h) => h.name), 'Portfolio'].map((name) => {
+          {histogramData.map((h) => h.name).map((name) => {
 
             const active = plotHistogramEnabled[name] ?? true;
 
