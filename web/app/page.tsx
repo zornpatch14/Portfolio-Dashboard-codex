@@ -1153,6 +1153,9 @@ export default function HomePage() {
 
   }, [activeSelection.files, matchesFilters]);
 
+  const hasFiles = filteredFileIds.length > 0;
+  const canQueryData = hasFiles && !apiMissing;
+
 
 
   const filteredFileSet = useMemo(() => new Set(filteredFileIds), [filteredFileIds]);
@@ -1425,6 +1428,8 @@ export default function HomePage() {
 
     staleTime: STALE_TIME,
 
+    enabled: canQueryData,
+
   });
 
   const equityPctQuery = useQuery({
@@ -1434,6 +1439,8 @@ export default function HomePage() {
     queryFn: () => fetchSeries(selectionForFetch, 'equityPercent', includeDownsample),
 
     staleTime: STALE_TIME,
+
+    enabled: canQueryData,
 
   });
 
@@ -1445,6 +1452,8 @@ export default function HomePage() {
 
     staleTime: STALE_TIME,
 
+    enabled: canQueryData,
+
   });
 
   const intradayDdQuery = useQuery({
@@ -1454,6 +1463,8 @@ export default function HomePage() {
     queryFn: () => fetchSeries(selectionForFetch, 'intradayDrawdown', includeDownsample),
 
     staleTime: STALE_TIME,
+
+    enabled: canQueryData,
 
   });
 
@@ -1465,6 +1476,8 @@ export default function HomePage() {
 
     staleTime: STALE_TIME,
 
+    enabled: canQueryData,
+
   });
 
   const marginQuery = useQuery({
@@ -1474,6 +1487,8 @@ export default function HomePage() {
     queryFn: () => fetchSeries(selectionForFetch, 'margin', includeDownsample),
 
     staleTime: STALE_TIME,
+
+    enabled: canQueryData,
 
   });
 
@@ -1485,6 +1500,8 @@ export default function HomePage() {
 
     staleTime: STALE_TIME,
 
+    enabled: canQueryData,
+
   });
 
   const metricsQuery = useQuery({
@@ -1494,6 +1511,8 @@ export default function HomePage() {
     queryFn: () => fetchMetrics(selectionForFetch),
 
     staleTime: STALE_TIME,
+
+    enabled: canQueryData,
 
   });
 
@@ -2023,9 +2042,25 @@ export default function HomePage() {
 
   const activeBadge = busy ? <div className="badge">Loading...</div> : <div className="badge">Live</div>;
 
+  const renderUploadPlaceholder = (label: string) => (
+
+    <div className="panel" style={{ marginTop: 8 }}>
+
+      <div className="placeholder-text">Upload files to view {label}.</div>
+
+    </div>
+
+  );
 
 
-  const renderSummary = () => (
+
+  const renderSummary = () => {
+
+    if (!hasFiles) {
+      return renderUploadPlaceholder('the summary tab');
+    }
+
+    return (
 
     <div>
 
@@ -2293,11 +2328,19 @@ export default function HomePage() {
 
     </div>
 
-  );
+    );
+
+  };
 
 
 
-  const renderEquityCurves = () => (
+  const renderEquityCurves = () => {
+
+    if (!hasFiles) {
+      return renderUploadPlaceholder('equity curves');
+    }
+
+    return (
 
     <div className="panel" style={{ marginTop: 8 }}>
 
@@ -2387,7 +2430,9 @@ export default function HomePage() {
 
     </div>
 
-  );
+    );
+
+  };
 
 
 
@@ -2490,7 +2535,10 @@ export default function HomePage() {
 
 
   const renderOptimizer = () => {
-  const summary = optimizerResult?.summary;
+    if (!hasFiles) {
+      return renderUploadPlaceholder('the Riskfolio optimizer');
+    }
+    const summary = optimizerResult?.summary;
   const contractRows = optimizerResult?.contracts ?? [];
   const weightRows = optimizerWeights;
   const statusLabel = optimizerStatus?.status ?? (optimizerJobId ? 'running' : 'idle');
@@ -3318,7 +3366,13 @@ const renderCta = () => (
 
 
 
-  const renderPortfolioDrawdown = () => (
+  const renderPortfolioDrawdown = () => {
+
+    if (!hasFiles) {
+      return renderUploadPlaceholder('portfolio drawdown');
+    }
+
+    return (
 
     <div className="panel" style={{ marginTop: 8 }}>
 
@@ -3402,11 +3456,19 @@ const renderCta = () => (
 
     </div>
 
-  );
+    );
+
+  };
 
 
 
-  const renderIntradayDrawdown = () => (
+  const renderIntradayDrawdown = () => {
+
+    if (!hasFiles) {
+      return renderUploadPlaceholder('intraday drawdown');
+    }
+
+    return (
 
     <div className="panel" style={{ marginTop: 8 }}>
 
@@ -3448,11 +3510,19 @@ const renderCta = () => (
 
     </div>
 
-  );
+    );
+
+  };
 
 
 
-  const renderMargin = () => (
+  const renderMargin = () => {
+
+    if (!hasFiles) {
+      return renderUploadPlaceholder('margin insights');
+    }
+
+    return (
 
     <div className="panel" style={{ marginTop: 8 }}>
 
@@ -3586,11 +3656,19 @@ const renderCta = () => (
 
     </div>
 
-  );
+    );
+
+  };
 
 
 
-  const renderHistogram = () => (
+  const renderHistogram = () => {
+
+    if (!hasFiles) {
+      return renderUploadPlaceholder('histogram analysis');
+    }
+
+    return (
 
     <div className="panel" style={{ marginTop: 8 }}>
 
@@ -3726,11 +3804,19 @@ const renderCta = () => (
 
     </div>
 
-  );
+    );
+
+  };
 
 
 
-  const renderMetrics = () => (
+  const renderMetrics = () => {
+
+    if (!hasFiles) {
+      return renderUploadPlaceholder('metrics');
+    }
+
+    return (
 
     <div className="panel" style={{ marginTop: 8 }}>
 
@@ -3762,7 +3848,9 @@ const renderCta = () => (
 
     </div>
 
-  );
+    );
+
+  };
 
 
 
