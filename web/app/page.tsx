@@ -3877,23 +3877,11 @@ const renderCta = () => (
                 setUploadStatus(`Upload job ${response.job_id} completed (${response.files.length} files ingested)`);
 
                 const meta = await getSelectionMeta();
-
                 setSelectionMeta(meta);
-
                 setFilesMeta(meta.files);
-
-                const ids = meta.files.map((f) => f.file_id);
-
-                const labels = Object.fromEntries(meta.files.map((f) => [f.file_id, f.filename]));
-
                 setActiveSelection((prev) => ({
-
                   ...prev,
-
-                  fileLabels: labels,
-
-                  files: ids,
-
+                  ...deriveSelectionDefaults(meta, prev),
                 }));
 
               } catch (error) {
