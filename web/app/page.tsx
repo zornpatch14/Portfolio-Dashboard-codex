@@ -101,6 +101,16 @@ const formatCurrency = (value: number | null | undefined) => {
   return `$${value.toLocaleString()}`;
 };
 
+const formatHistogramDollarRange = (start: number, end: number) =>
+  `${formatCurrency(start)} to ${formatCurrency(end)}`;
+
+const formatHistogramPercentRange = (start: number, end: number, equity: number) => {
+  if (!equity) return '0.00% to 0.00%';
+  const startPct = (start / equity) * 100;
+  const endPct = (end / equity) * 100;
+  return `${startPct.toFixed(2)}% to ${endPct.toFixed(2)}%`;
+};
+
 const parseOptionalNumber = (raw: string): number | null => {
   if (!raw.trim()) return null;
   const parsed = Number(raw);
@@ -3534,49 +3544,43 @@ const renderCta = () => (
 
         const activeHists = histogramData.filter((h) => plotHistogramEnabled[h.name] !== false);
 
-        const bucketOrder = (activeHists[0]?.buckets ?? []).map((bucketItem) => bucketItem.bucket);
+        const baseBuckets = activeHists[0]?.buckets ?? [];
 
-        const bucketMap = new Map(bucketOrder.map((b) => [b, 0]));
+        const aggregatedBuckets = baseBuckets.map((bucket) => {
 
-        activeHists.forEach((hist) => {
+          const totalCount = activeHists.reduce((sum, hist) => {
 
-          hist.buckets.forEach((bucket) => {
+            const match = hist.buckets.find(
 
-            bucketMap.set(bucket.bucket, (bucketMap.get(bucket.bucket) || 0) + bucket.count);
+              (candidate) =>
 
-          });
+                candidate.start_value === bucket.start_value && candidate.end_value === bucket.end_value,
+
+            );
+
+            return sum + (match?.count ?? 0);
+
+          }, 0);
+
+          return { ...bucket, count: totalCount };
 
         });
 
-        const parsePct = (label: string) => {
+        const portfolioBucketsDollar = aggregatedBuckets.map((bucket) => ({
 
-          const cleaned = label.replace('%', '');
+          ...bucket,
 
-          const val = Number.parseFloat(cleaned);
-
-          return Number.isFinite(val) ? val : 0;
-
-        };
-
-        const portfolioBuckets = bucketOrder.map((bucket) => ({
-
-          bucket,
-
-          count: bucketMap.get(bucket) || 0,
+          bucket: formatHistogramDollarRange(bucket.start_value, bucket.end_value),
 
         }));
 
-        const portfolioBucketsDollar = bucketOrder.map((bucket) => {
+        const portfolioBucketsPercent = aggregatedBuckets.map((bucket) => ({
 
-          const pct = parsePct(bucket);
+          ...bucket,
 
-          const dollars = (pct / 100) * accountEquity;
+          bucket: formatHistogramPercentRange(bucket.start_value, bucket.end_value, accountEquity),
 
-          const label = dollars >= 0 ? `$${dollars.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : `-$${Math.abs(dollars).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-
-          return { bucket: label, count: bucketMap.get(bucket) || 0 };
-
-        });
+        }));
 
         return (
 
@@ -3608,9 +3612,9 @@ const renderCta = () => (
 
               </div>
 
-              <HistogramChart histogram={{ label: 'Portfolio Histogram (%)', buckets: portfolioBuckets }} />
+              <HistogramChart histogram={{ label: 'Portfolio Histogram (%)', buckets: portfolioBucketsPercent }} />
 
-              <div className="text-muted small" style={{ marginTop: 8 }}>Buckets: {portfolioBuckets.length}</div>
+              <div className="text-muted small" style={{ marginTop: 8 }}>Buckets: {portfolioBucketsPercent.length}</div>
 
             </div>
 
