@@ -79,8 +79,6 @@ const tabs = [
 
   { key: 'metrics', label: 'Metrics' },
 
-  { key: 'inverse-volatility', label: 'Inverse Volatility' },
-
 ] as const;
 
 const NO_DATA_MESSAGE = 'No data matches your selection.';
@@ -3669,30 +3667,6 @@ const renderCta = () => (
 
 
 
-  const renderInverseVolatility = () => (
-
-    <div className="panel" style={{ marginTop: 8 }}>
-
-      <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-
-        <h3 className="section-title" style={{ margin: 0 }}>Inverse Volatility</h3>
-
-        {activeBadge}
-
-      </div>
-
-      <div className="card" style={{ marginTop: 12 }}>
-
-        <div className="text-muted small">Placeholder for inverse-volatility controls and tables from the legacy app.</div>
-
-      </div>
-
-    </div>
-
-  );
-
-
-
   const renderAllocator = () => (
 
     <div className="panel" style={{ marginTop: 8 }}>
@@ -4295,7 +4269,6 @@ const renderCta = () => (
 
     if (activeTab === 'trade-pl-histogram') return renderHistogram();
 
-    if (activeTab === 'inverse-volatility') return renderInverseVolatility();
 
     return renderEquityCurves();
 

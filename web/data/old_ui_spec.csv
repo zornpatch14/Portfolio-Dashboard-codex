@@ -46,10 +46,6 @@ Riskfolio,Suggested Contracts,Table,riskfolio-suggested-table,Suggested Contract
 Riskfolio,Ex-ante and Ex-post Summary,Table/Charts,riskfolio-summary,"Efficient Frontier, Risk Contribution (%), Backtested Portfolio Equity, Asset Correlation",Displays portfolio analytics
 Riskfolio,Risk Parity,Tab,risk-parity-tab,Risk Parity (coming soon),Disabled placeholder
 Riskfolio,Hierarchical,Tab,hierarchical-tab,Hierarchical (coming soon),Disabled placeholder
-Inverse Volatility,IVP Controls,Button,compute-ivp,Compute IVP Suggestions,Compute inverse-volatility weights
-Inverse Volatility,IVP Controls,Input,ivp-multiplier,Multiplier:,Numeric multiplier for suggestions
-Inverse Volatility,IVP Controls,Button,apply-ivp,Apply to Contracts,Apply IVP weights to contracts
-Inverse Volatility,IVP Table,Table,ivp-table,Inverse Volatility Table,"Columns: File, Symbol, IVP Weight, Daily stdev (log), Suggested Weight Gap, Current Weight Gap, Base Contracts (min=1), Suggested Contracts, Suggested Margin, Current Contracts, Current Margin, Delta"
 Allocator,Allocator Settings,Slider,max-margin-use,Max margin use (% of equity),Range slider
 Allocator,Allocator Settings,Dropdown,alloc-objective,Objective,"Options: Max Return / Drawdown, Risk Parity (projected)"
 Allocator,Allocator Settings,Input,max-contracts,Maximum number of contracts,Numeric input
@@ -117,4 +113,3 @@ CTA Report,Table,Heading,Monthly return table heading,Monthly Rates of Return (n
 CTA Report,Charts,Chart,Monthly Rates Chart,Monthly Rates of Return (Additive),Bar chart of monthly additive returns
 CTA Report,Charts,Chart,NAV Path Comparison,NAV Path Comparison,Chart comparing nominal vs compounded net asset value
 CTA Report,Charts,Chart,Rolling Performance,Rolling 12-Month Performance,Chart of rolling 12-month returns
-Inverse Volatility,Controls,Label,Multiplier,Multiplier:,Label for numeric multiplier input
