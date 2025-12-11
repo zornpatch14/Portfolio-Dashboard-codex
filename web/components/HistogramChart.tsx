@@ -49,5 +49,5 @@ export function HistogramChart({ histogram }: Props) {
     };
   }, [histogram]);
 
-  return <div ref={ref} style={{ width: '100%', height: 260 }} />;
+  return <div ref={ref} style={{ width: '100%', height: 320 }} />;
 }
