@@ -17,8 +17,6 @@ import { EfficientFrontierChart } from '../components/EfficientFrontierChart';
 import { FrontierAllocationAreaChart } from '../components/FrontierAllocationAreaChart';
 
 import {
-  fetchCorrelations,
-  fetchCta,
   fetchHistogram,
   fetchMetrics,
   fetchSeries,
@@ -27,8 +25,6 @@ import {
   uploadFiles,
   getSelectionMeta,
   listFiles,
-  mockCorrelations,
-  mockCta,
   SeriesKind,
   JobStatusResponse,
   MeanRiskPayload,
@@ -333,8 +329,6 @@ export default function HomePage() {
   const [activeSelection, setActiveSelection] = useState<Selection>(selections[0]);
 
   const [activeTab, setActiveTab] = useState<TabKey>('load-trade-lists');
-
-  const [corrMode, setCorrMode] = useState('drawdown_pct');
 
   const [includeDownsample, setIncludeDownsample] = useState(false);
 
@@ -1952,32 +1946,6 @@ export default function HomePage() {
 
 
 
-  const correlationQuery = useQuery({
-
-    queryKey: ['correlations', selectionKey, corrMode],
-
-    queryFn: () => fetchCorrelations(selectionForFetch, corrMode),
-
-    initialData: mockCorrelations(selectionForFetch, corrMode),
-
-    staleTime: STALE_TIME,
-
-  });
-
-
-
-  const ctaQuery = useQuery({
-
-    queryKey: ['cta', selectionKey],
-
-    queryFn: () => fetchCta(selectionForFetch),
-
-    initialData: mockCta(selectionForFetch),
-
-    staleTime: STALE_TIME,
-
-  });
-
 
 
   const metricsSummary = useMemo(() => {
@@ -2032,11 +2000,7 @@ export default function HomePage() {
 
     marginQuery.isFetching ||
 
-    histogramQuery.isFetching ||
-
-    correlationQuery.isFetching ||
-
-    ctaQuery.isFetching;
+    histogramQuery.isFetching;
 
 
 
@@ -2442,89 +2406,30 @@ export default function HomePage() {
 
       <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
 
-        <h3 className="section-title" style={{ margin: 0 }}>Correlation Heatmap</h3>
+        <h3 className="section-title" style={{ margin: 0 }}>Correlations</h3>
 
-        {activeBadge}
+        <div className="badge">Coming soon</div>
 
       </div>
 
       <p className="text-muted small" style={{ marginTop: 4 }}>
 
-        Mirrors the Dash correlations tab (drawdown %, returns, P/L, slope). Use the mode and slope controls below to switch views.
+        Correlation heatmaps will return once the backend routes are wired to real data. Upload files now so they’re ready
+        to use when the feature ships.
 
       </p>
 
-      <div className="grid-2" style={{ marginTop: 10 }}>
-
-        <div>
-
-          <label className="field-label" htmlFor="corr-mode">Correlation mode</label>
-
-          <select
-
-            id="corr-mode"
-
-            className="input"
-
-            value={corrMode}
-
-            onChange={(event) => setCorrMode(event.target.value)}
-
-          >
-
-            <option value="drawdown_pct">Daily Drawdown % (recommended)</option>
-
-            <option value="returns_z">Z-scored Daily Returns</option>
-
-            <option value="pl">Daily $ P/L</option>
-
-            <option value="slope">Rolling Slope</option>
-
-          </select>
-
-        </div>
-
-        <div>
-
-          <label className="field-label" htmlFor="corr-window">Slope window (if slope mode)</label>
-
-          <input
-
-            id="corr-window"
-
-            className="input"
-
-            type="number"
-
-            min={5}
-
-            step={1}
-
-            value={corrMode === 'slope' ? 20 : ''}
-
-            placeholder="20"
-
-            disabled={corrMode !== 'slope'}
-
-          />
-
-        </div>
-
-      </div>
-
-
-
       <div className="card" style={{ marginTop: 14 }}>
 
-        <CorrelationHeatmap data={correlationQuery.data ?? mockCorrelations(activeSelection, corrMode)} />
+        <div className="placeholder-text">
 
-      </div>
+          {hasFiles
 
-      <div className="text-muted small" style={{ marginTop: 10 }}>
+            ? 'Correlation matrix calculations are coming soon.'
 
-        {correlationQuery.data?.notes?.map((note) => (
-          <div key={note}>- {note}</div>
-        ))}
+            : 'Upload files to view correlations once this module is available.'}
+
+        </div>
 
       </div>
 
@@ -3154,7 +3059,7 @@ export default function HomePage() {
 };
 
 
-const renderCta = () => (
+  const renderCta = () => (
 
     <div className="panel" style={{ marginTop: 8 }}>
 
@@ -3162,169 +3067,30 @@ const renderCta = () => (
 
         <h3 className="section-title" style={{ margin: 0 }}>CTA-Style Report</h3>
 
-        {activeBadge}
+        <div className="badge">Coming soon</div>
 
       </div>
 
       <p className="text-muted small" style={{ marginTop: 4 }}>
 
-        Mirrors monthly/annual ROR tables, ROI/Annual ROR/ROA summary, time-in-market, longest flat, and download prompts from the
-
-        Dash CTA tab.
+        This tab will eventually mirror the Dash CTA report (ROI summary, monthly/annual ROR tables, downloads). Until the
+        backend is finalized, data is intentionally withheld.
 
       </p>
 
+      <div className="card" style={{ marginTop: 12 }}>
 
+        <div className="placeholder-text">
 
-      <div className="metric-cards" style={{ marginTop: 12 }}>
+          {hasFiles
 
-        <div className="metric-card">
+            ? 'CTA analytics will appear here once implemented.'
 
-          <span className="text-muted small">ROI</span>
-
-          <strong>{ctaQuery.data?.summary.roi}%</strong>
-
-        </div>
-
-        <div className="metric-card">
-
-          <span className="text-muted small">Annual ROR</span>
-
-          <strong>{ctaQuery.data?.summary.annualRor}%</strong>
-
-        </div>
-
-        <div className="metric-card">
-
-          <span className="text-muted small">Time in Market</span>
-
-          <strong>{ctaQuery.data?.summary.timeInMarket}%</strong>
-
-        </div>
-
-        <div className="metric-card">
-
-          <span className="text-muted small">Longest Flat (days)</span>
-
-          <strong>{ctaQuery.data?.summary.longestFlat}</strong>
-
-        </div>
-
-        <div className="metric-card">
-
-          <span className="text-muted small">Max Run-up</span>
-
-          <strong>{ctaQuery.data?.summary.maxRunup}%</strong>
-
-        </div>
-
-        <div className="metric-card">
-
-          <span className="text-muted small">Max Drawdown</span>
-
-          <strong>{ctaQuery.data?.summary.maxDrawdown}%</strong>
+            : 'Upload files now so CTA analytics can run when the feature launches.'}
 
         </div>
 
       </div>
-
-
-
-      <div className="grid-2" style={{ marginTop: 16 }}>
-
-        <div className="card">
-
-          <strong>Monthly Returns (additive vs compounded)</strong>
-
-          <table className="compact-table">
-
-            <thead>
-
-              <tr>
-
-                <th>Month</th>
-
-                <th>Additive %</th>
-
-                <th>Compounded %</th>
-
-              </tr>
-
-            </thead>
-
-            <tbody>
-
-              {ctaQuery.data?.monthly.map((row) => (
-
-                <tr key={row.month}>
-
-                  <td>{row.month}</td>
-
-                  <td>{row.additive}%</td>
-
-                  <td>{row.compounded}%</td>
-
-                </tr>
-
-              ))}
-
-            </tbody>
-
-          </table>
-
-        </div>
-
-        <div className="card">
-
-          <strong>Annual ROR</strong>
-
-          <table className="compact-table">
-
-            <thead>
-
-              <tr>
-
-                <th>Year</th>
-
-                <th>Additive %</th>
-
-                <th>Compounded %</th>
-
-              </tr>
-
-            </thead>
-
-            <tbody>
-
-              {ctaQuery.data?.annual.map((row) => (
-
-                <tr key={row.year}>
-
-                  <td>{row.year}</td>
-
-                  <td>{row.additive}%</td>
-
-                  <td>{row.compounded}%</td>
-
-                </tr>
-
-              ))}
-
-            </tbody>
-
-          </table>
-
-          <div className="text-muted small" style={{ marginTop: 8 }}>
-
-            Additive vs compounded view matches the Dash helper text.
-
-          </div>
-
-        </div>
-
-      </div>
-
-
 
       <div className="card" style={{ marginTop: 14 }}>
 
@@ -4541,10 +4307,8 @@ const renderCta = () => (
 
               metricsQuery.refetch();
 
-              correlationQuery.refetch();
 
           
-              ctaQuery.refetch();
 
             }}
 
@@ -4613,4 +4377,3 @@ const renderCta = () => (
   );
 
 }
-
