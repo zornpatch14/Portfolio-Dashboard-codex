@@ -545,19 +545,14 @@ class IngestService:
             mtm_df.write_parquet(path)
             mtm_path = str(path)
 
-        date_min = None
-        date_max = None
-        if "exit_time" in trades_df.columns and trades_df.height > 0:
-            date_min = trades_df["exit_time"].min()
-            date_max = trades_df["exit_time"].max()
-            if isinstance(date_min, pl.Series):
-                date_min = date_min.item()
-            if isinstance(date_max, pl.Series):
-                date_max = date_max.item()
-        if date_min is not None and not isinstance(date_min, datetime):
-            date_min = pl.from_epoch(pl.Series([date_min]), time_unit="ms")[0]
-        if date_max is not None and not isinstance(date_max, datetime):
-            date_max = pl.from_epoch(pl.Series([date_max]), time_unit="ms")[0]
+        if "mtm_date" not in mtm_df.columns or mtm_df.is_empty():
+            raise ValueError(f"No MTM (Daily P&L) data found in {xlsx_path.name}")
+        date_min = mtm_df["mtm_date"].min()
+        date_max = mtm_df["mtm_date"].max()
+        if isinstance(date_min, pl.Series):
+            date_min = date_min.item()
+        if isinstance(date_max, pl.Series):
+            date_max = date_max.item()
 
         symbol, interval, strategy = parse_filename_meta(str(xlsx_path))
         meta = TradeFileMetadata(

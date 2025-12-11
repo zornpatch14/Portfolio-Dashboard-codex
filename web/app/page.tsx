@@ -33,6 +33,7 @@ import {
   JobStatusResponse,
   MeanRiskPayload,
   coerceNumber,
+  SelectionMeta,
 } from '../lib/api';
 
 import { loadSampleSelections, normalizeSelection, Selection } from '../lib/selections';
@@ -176,6 +177,104 @@ type FilterValueMap = {
 
   strategies: string[];
 
+};
+
+type SelectionDefaults = Pick<
+  Selection,
+  | 'fileLabels'
+  | 'files'
+  | 'symbols'
+  | 'intervals'
+  | 'strategies'
+  | 'direction'
+  | 'spike'
+  | 'contracts'
+  | 'contractMultipliers'
+  | 'margins'
+  | 'marginOverrides'
+  | 'start'
+  | 'end'
+>;
+
+const deriveSelectionDefaults = (meta: SelectionMeta, prev: Selection): SelectionDefaults => {
+  const files = meta.files.map((file) => file.file_id);
+  const fileLabels = Object.fromEntries(meta.files.map((file) => [file.file_id, file.filename]));
+
+  const symbolSet = new Set<string>();
+  const intervalSet = new Set<string>();
+  const strategySet = new Set<string>();
+
+  meta.files.forEach((file) => {
+    file.symbols.forEach((symbol) => {
+      if (symbol) symbolSet.add(symbol);
+    });
+    file.intervals.forEach((interval) => {
+      if (interval) intervalSet.add(String(interval));
+    });
+    file.strategies.forEach((strategy) => {
+      if (strategy) strategySet.add(strategy);
+    });
+  });
+
+  const symbols = Array.from(symbolSet).sort();
+  const intervals = Array.from(intervalSet).sort((a, b) => Number(a) - Number(b));
+  const strategies = Array.from(strategySet).sort();
+
+  const existingContracts = prev.contractMultipliers ?? prev.contracts ?? {};
+  const contracts: Record<string, number> = {};
+  files.forEach((fileId) => {
+    contracts[fileId] = existingContracts[fileId] ?? 1;
+  });
+
+  const inferMarginDefault = (file: SelectionMeta['files'][number]): number => {
+    if (typeof file.margin_per_contract === 'number' && file.margin_per_contract > 0) {
+      return file.margin_per_contract;
+    }
+    const symbol = (file.symbols[0] || '').toUpperCase();
+    if (symbol && MARGIN_DEFAULTS[symbol]) {
+      return MARGIN_DEFAULTS[symbol];
+    }
+    return FALLBACK_MARGIN;
+  };
+
+  const existingMargins = prev.marginOverrides ?? prev.margins ?? {};
+  const margins: Record<string, number> = {};
+  meta.files.forEach((file) => {
+    const fileId = file.file_id;
+    if (Object.prototype.hasOwnProperty.call(existingMargins, fileId)) {
+      margins[fileId] = existingMargins[fileId];
+    } else {
+      margins[fileId] = inferMarginDefault(file);
+    }
+  });
+
+  const dateCandidates = meta.files
+    .flatMap((file) => [file.date_min, file.date_max])
+    .filter((value): value is string => Boolean(value));
+  const derivedStart = meta.date_min ?? dateCandidates.reduce<string | undefined>((acc, value) => {
+    if (!acc || value < acc) return value;
+    return acc;
+  }, undefined);
+  const derivedEnd = meta.date_max ?? dateCandidates.reduce<string | undefined>((acc, value) => {
+    if (!acc || value > acc) return value;
+    return acc;
+  }, undefined);
+
+  return {
+    fileLabels,
+    files,
+    symbols,
+    intervals,
+    strategies,
+    direction: 'All',
+    spike: true,
+    contracts,
+    contractMultipliers: contracts,
+    margins,
+    marginOverrides: margins,
+    start: prev.start ?? derivedStart ?? null,
+    end: prev.end ?? derivedEnd ?? null,
+  };
 };
 
 type RiskfolioSuggestedRow = {
@@ -3778,23 +3877,11 @@ const renderCta = () => (
                 setUploadStatus(`Upload job ${response.job_id} completed (${response.files.length} files ingested)`);
 
                 const meta = await getSelectionMeta();
-
                 setSelectionMeta(meta);
-
                 setFilesMeta(meta.files);
-
-                const ids = meta.files.map((f) => f.file_id);
-
-                const labels = Object.fromEntries(meta.files.map((f) => [f.file_id, f.filename]));
-
                 setActiveSelection((prev) => ({
-
                   ...prev,
-
-                  fileLabels: labels,
-
-                  files: ids,
-
+                  ...deriveSelectionDefaults(meta, prev),
                 }));
 
               } catch (error) {
