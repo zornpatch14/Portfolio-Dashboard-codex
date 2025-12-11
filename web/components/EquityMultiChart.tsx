@@ -36,6 +36,22 @@ export function EquityMultiChart({ title, series, description, height = 380 }: P
         top: 4,
       },
       grid: { left: 50, right: 20, top: 50, bottom: 40 },
+      dataZoom: [
+        {
+          type: 'slider',
+          height: 18,
+          bottom: 10,
+          borderColor: '#334b76',
+          backgroundColor: 'rgba(30, 46, 73, 0.7)',
+          handleStyle: { color: '#8fe3c7', borderColor: '#1b2c44' },
+          textStyle: { color: '#a5b2c9' },
+        },
+        {
+          type: 'inside',
+          zoomOnMouseWheel: true,
+          moveOnMouseMove: true,
+        },
+      ],
       xAxis: {
         type: 'time',
         axisLine: { lineStyle: { color: '#334b76' } },

@@ -15,7 +15,6 @@ import pandas as pd
 import polars as pl
 
 from api.app.constants import DEFAULT_CONTRACT_MULTIPLIER, get_contract_spec, MARGIN_SPEC
-from api.app.utils.calendars import get_us_futures_calendar
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +100,7 @@ def _canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _parse_mtm_daily_sheet(xls: pd.ExcelFile, filename: str, symbol: str | None = None) -> pd.DataFrame:
-    """Extract and densify the Daily MTM sheet using the US futures exchange calendar."""
+    """Extract and densify the Daily MTM sheet using calendar-day windows."""
 
     empty_cols = ["File", "mtm_date", "mtm_net_profit", "mtm_session_start", "mtm_session_end"]
 
@@ -153,26 +152,15 @@ def _parse_mtm_daily_sheet(xls: pd.ExcelFile, filename: str, symbol: str | None 
     if pd.isna(start_date) or pd.isna(end_date):
         return pd.DataFrame(columns=empty_cols)
 
-    cal = get_us_futures_calendar()
-    schedule = cal.schedule.loc[start_date:end_date]
-    if schedule.empty:
-        return pd.DataFrame(columns=empty_cols)
-
-    def _to_naive_index(values: pd.Index | pd.Series) -> pd.DatetimeIndex:
-        idx = pd.DatetimeIndex(values)
-        if idx.tz is not None:
-            idx = idx.tz_convert("UTC").tz_localize(None)
-        return idx
-
-    session_index = _to_naive_index(schedule.index).normalize()
-    session_opens = _to_naive_index(schedule["open"])
-    session_closes = _to_naive_index(schedule["close"])
+    all_dates = pd.date_range(start=start_date, end=end_date, freq="D").normalize()
+    session_start = pd.to_datetime(all_dates)
+    session_end = session_start + pd.Timedelta(days=1)
 
     schedule_frame = pd.DataFrame(
         {
-            "mtm_date": session_index,
-            "mtm_session_start": session_opens,
-            "mtm_session_end": session_closes,
+            "mtm_date": all_dates,
+            "mtm_session_start": session_start,
+            "mtm_session_end": session_end,
         }
     )
 
@@ -224,7 +212,7 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
         pct_series = (
             df["% Profit"].astype(str).str.replace(",", "", regex=False).str.replace("%", "", regex=False).str.strip()
         )
-        df["% Profit"] = pd.to_numeric(pct_series, errors="coerce") / 100.0
+        df["% Profit"] = pd.to_numeric(pct_series, errors="coerce")
 
     entry_types = {"Buy", "Sell Short"}
     exit_types = {"Sell", "Buy to Cover"}
@@ -388,6 +376,20 @@ def parse_tradestation_trades(file_path: Path) -> tuple[pl.DataFrame, pl.DataFra
             trades_df["exit_time"] = pd.to_datetime(trades_df["exit_time"], errors="coerce")
         if "entry_time" in trades_df.columns:
             trades_df["entry_time"] = pd.to_datetime(trades_df["entry_time"], errors="coerce")
+
+        if "exit_time" in trades_df.columns:
+            # Store the timestamp exactly as provided before applying the minimum-bar adjustment.
+            trades_df["raw_exit_time"] = trades_df["exit_time"]
+            interval_minutes = interval if interval and interval > 0 else None
+            # Fall back to a single-minute bar when interval is missing so zero-duration trades still extend.
+            min_bar_delta = pd.Timedelta(minutes=interval_minutes or 1)
+            if "entry_time" in trades_df.columns:
+                mask = (
+                    trades_df["exit_time"].notna()
+                    & trades_df["entry_time"].notna()
+                    & (trades_df["exit_time"] <= trades_df["entry_time"])
+                )
+                trades_df.loc[mask, "exit_time"] = trades_df.loc[mask, "entry_time"] + min_bar_delta
 
         num_cols = [
             "net_profit",
