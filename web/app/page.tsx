@@ -1733,6 +1733,24 @@ export default function HomePage() {
 
 
 
+  const purchasingPowerDrawdownReferenceLine = useMemo(() => {
+
+    const base = accountEquity ? accountEquity * -1 : 0;
+
+    if (!base || !purchasingPowerDrawdownLines.portfolio.length) return [];
+
+    return purchasingPowerDrawdownLines.portfolio.map((point) => ({
+
+      timestamp: point.timestamp,
+
+      value: base,
+
+    }));
+
+  }, [accountEquity, purchasingPowerDrawdownLines.portfolio]);
+
+
+
   useEffect(() => {
 
     const names = new Set<string>();
@@ -3413,6 +3431,12 @@ const renderCta = () => (
             ...purchasingPowerDrawdownLines.perFile.filter((s) => plotMarginEnabled[s.name] !== false),
 
             ...(plotMarginEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: purchasingPowerDrawdownLines.portfolio }]),
+
+            ...(purchasingPowerDrawdownReferenceLine.length
+
+              ? [{ name: 'Account Equity', points: purchasingPowerDrawdownReferenceLine }]
+
+              : []),
 
           ]}
 
