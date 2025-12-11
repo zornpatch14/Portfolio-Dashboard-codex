@@ -101,8 +101,11 @@ const formatCurrency = (value: number | null | undefined) => {
   return `$${value.toLocaleString()}`;
 };
 
+const formatHistogramDollar = (value: number) =>
+  `$${value.toLocaleString(undefined, { maximumFractionDigits: 0, minimumFractionDigits: 0 })}`;
+
 const formatHistogramDollarRange = (start: number, end: number) =>
-  `${formatCurrency(start)} to ${formatCurrency(end)}`;
+  `${formatHistogramDollar(start)} to ${formatHistogramDollar(end)}`;
 
 const formatHistogramPercentRange = (start: number, end: number, equity: number) => {
   if (!equity) return '0.0% to 0.0%';
