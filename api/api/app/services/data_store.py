@@ -971,7 +971,7 @@ class DataStore:
 
 
 
-    def histogram(self, selection: Selection, bins: int = 15) -> HistogramResponse:
+    def histogram(self, selection: Selection, bins: int = 16) -> HistogramResponse:
 
         view = self._view_for_selection(selection)
 
@@ -987,7 +987,12 @@ class DataStore:
 
         values = returns["pnl"].to_numpy()
 
-        hist, edges = np.histogram(values, bins=bins)
+        max_abs = float(np.max(np.abs(values)))
+        if max_abs == 0:
+            edges = np.linspace(-1, 1, bins + 1)
+        else:
+            edges = np.linspace(-max_abs, max_abs, bins + 1)
+        hist, _ = np.histogram(values, bins=edges)
 
         def _format_range(start: float, end: float) -> str:
 
