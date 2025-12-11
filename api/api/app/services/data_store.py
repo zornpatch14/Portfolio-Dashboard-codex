@@ -971,7 +971,7 @@ class DataStore:
 
 
 
-    def histogram(self, selection: Selection, bins: int = 20) -> HistogramResponse:
+    def histogram(self, selection: Selection, bins: int = 15) -> HistogramResponse:
 
         view = self._view_for_selection(selection)
 
