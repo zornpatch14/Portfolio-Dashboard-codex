@@ -105,10 +105,10 @@ const formatHistogramDollarRange = (start: number, end: number) =>
   `${formatCurrency(start)} to ${formatCurrency(end)}`;
 
 const formatHistogramPercentRange = (start: number, end: number, equity: number) => {
-  if (!equity) return '0.00% to 0.00%';
+  if (!equity) return '0.0% to 0.0%';
   const startPct = (start / equity) * 100;
   const endPct = (end / equity) * 100;
-  return `${startPct.toFixed(2)}% to ${endPct.toFixed(2)}%`;
+  return `${startPct.toFixed(1)}% to ${endPct.toFixed(1)}%`;
 };
 
 const parseOptionalNumber = (raw: string): number | null => {
