@@ -1,33 +1,24 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta
-from typing import AsyncGenerator, Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Tuple
 from uuid import uuid4
 
 from ..schemas import (
-    AllocationRow,
     CTARecord,
     CTAResponse,
-    ContractRow,
     CorrelationResponse,
     FileMetadata,
     SeriesContributor,
     FileUploadResponse,
-    JobEvent,
-    JobResult,
     JobStatusResponse,
     MetricsResponse,
     MetricsRow,
-    OptimizerJobRequest,
-    OptimizerJobResponse,
-    OptimizerSummary,
     Selection,
     SelectionMeta,
     SeriesPoint,
     SeriesResponse,
 )
-from ..constants import DEFAULT_ACCOUNT_EQUITY
 
 
 class InMemoryStore:
@@ -156,34 +147,6 @@ class InMemoryStore:
             for file_id in selection.files or self.files.keys()
         ]
         return CTAResponse(selection=selection, records=records)
-
-    def optimizer(self, request: OptimizerJobRequest) -> OptimizerJobResponse:
-        job_id = str(uuid4())
-        self.jobs[job_id] = JobStatusResponse(job_id=job_id, status="queued", progress=0)
-        return OptimizerJobResponse(job_id=job_id)
-
-    def job_status(self, job_id: str) -> JobStatusResponse:
-        if job_id not in self.jobs:
-            raise KeyError(job_id)
-        status = self.jobs[job_id]
-        if status.status != "completed":
-            status.progress = min(status.progress + 20, 100)
-            if status.progress == 100:
-                status.status = "completed"
-                status.result = JobResult()
-        return status
-
-    async def job_events(self, job_id: str) -> AsyncGenerator[str, None]:
-        status = self.job_status(job_id)
-        for step in range(status.progress, 101, 20):
-            current = self.jobs[job_id]
-            current.progress = step
-            if step >= 100:
-                current.status = "completed"
-                current.result = JobResult()
-            event = JobEvent(job_id=job_id, status=current.status, progress=current.progress, message="heartbeat")
-            yield f"data: {event.model_dump_json()}\n\n"
-            await asyncio.sleep(0.1)
 
     def export_rows(self, selection: Selection, kind: str) -> Tuple[str, str]:
         filename = f"{kind}_export.csv"

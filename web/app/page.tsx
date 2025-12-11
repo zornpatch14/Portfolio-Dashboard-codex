@@ -4276,7 +4276,7 @@ const renderCta = () => (
           />
           <div className="text-muted small" style={{ marginTop: 8 }}>
 
-            Mirrors Dash account equity input (used for purchasing power, allocator seed, and margin tab).
+            Mirrors Dash account equity input (used for purchasing power and the margin tab).
 
           </div>
 
