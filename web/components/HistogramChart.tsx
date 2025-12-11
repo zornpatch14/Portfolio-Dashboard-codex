@@ -17,7 +17,7 @@ export function HistogramChart({ histogram }: Props) {
     chart.setOption({
       backgroundColor: 'transparent',
       tooltip: { trigger: 'axis' },
-      grid: { left: 50, right: 20, top: 30, bottom: 70, containLabel: true },
+      grid: { left: 60, right: 20, top: 30, bottom: 90, containLabel: true },
       xAxis: {
         type: 'category',
         data: histogram.buckets.map((b) => b.bucket),
