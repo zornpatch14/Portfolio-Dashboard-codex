@@ -303,36 +303,6 @@ const selectionToApiPayload = (selection: Selection): ApiSelectionPayload => {
 };
 
 
-export type CTAResponse = {
-
-  summary: {
-
-    roi: number;
-
-    annualRor: number;
-
-    timeInMarket: number;
-
-    longestFlat: number;
-
-    maxRunup: number;
-
-    maxDrawdown: number;
-
-    avgMonthly: number;
-
-    stdMonthly: number;
-
-  };
-
-  monthly: { month: string; additive: number; compounded: number }[];
-
-  annual: { year: number; additive: number; compounded: number }[];
-
-};
-
-
-
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
 
 
