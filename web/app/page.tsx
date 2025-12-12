@@ -3683,6 +3683,10 @@ export default function HomePage() {
 
 
 
+      {filesMeta.length ? (
+
+        <>
+
       <div className="grid-2" style={{ marginTop: 14 }}>
 
         <div className="card">
@@ -4092,6 +4096,18 @@ export default function HomePage() {
         <div className="text-muted small" style={{ marginTop: 8 }}>Maps to /api/v1/export/trades and /api/v1/export/metrics.</div>
 
       </div>
+
+        </>
+
+      ) : (
+
+        <div className="card" style={{ marginTop: 16 }}>
+
+          <div className="placeholder-text">No files yet—use the upload tool above to ingest trade lists.</div>
+
+        </div>
+
+      )}
 
     </div>
 
