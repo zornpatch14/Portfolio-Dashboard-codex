@@ -71,7 +71,7 @@ async def health() -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
-# Register API routers (currently stubbed implementations; replace with real services).
+# Register API routers; every endpoint is wired to live services only.
 app.include_router(upload.router)
 app.include_router(files.router)
 app.include_router(series.router)
