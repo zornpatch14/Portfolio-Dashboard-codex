@@ -32,11 +32,9 @@ import {
   SelectionMeta,
 } from '../lib/api';
 
-import { loadSampleSelections, normalizeSelection, Selection } from '../lib/selections';
+import { blankSelection, normalizeSelection, Selection } from '../lib/selections';
 
 
-
-const selections = loadSampleSelections();
 
 const SELECTION_STORAGE_KEY = 'portfolio-selection-state';
 
@@ -326,7 +324,7 @@ type TabKey = (typeof tabs)[number]['key'];
 
 export default function HomePage() {
 
-  const [activeSelection, setActiveSelection] = useState<Selection>(selections[0]);
+  const [activeSelection, setActiveSelection] = useState<Selection>(blankSelection);
 
   const [activeTab, setActiveTab] = useState<TabKey>('load-trade-lists');
 
@@ -650,13 +648,7 @@ export default function HomePage() {
   }, [selectionMeta, activeSelection.accountEquity]);
 
 
-  const availableFiles = useMemo(
-
-    () => (filesMeta.length ? filesMeta.map((f) => f.file_id).sort() : Array.from(new Set(selections.flatMap((s) => s.files))).sort()),
-
-    [filesMeta],
-
-  );
+  const availableFiles = useMemo(() => (filesMeta.length ? filesMeta.map((f) => f.file_id).sort() : []), [filesMeta]);
 
 
 
