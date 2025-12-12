@@ -32,7 +32,8 @@ import {
   SelectionMeta,
 } from '../lib/api';
 
-import { blankSelection, normalizeSelection, Selection } from '../lib/selections';
+import { blankSelection, normalizeSelection } from '../lib/selections';
+import type { Selection } from '../lib/types/selection';
 
 
 

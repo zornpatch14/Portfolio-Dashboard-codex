@@ -1,4 +1,4 @@
-import { Selection } from './selections';
+import type { Selection } from './types/selection';
 
 export const coerceNumber = (value: unknown, fallback = 0): number => {
   const parsed = Number(value);
@@ -609,4 +609,3 @@ export async function uploadFiles(formData: FormData): Promise<FileUploadRespons
   return (await response.json()) as FileUploadResponse;
 
 }
-

@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { Selection } from '../lib/selections';
+import type { Selection } from '../lib/types/selection';
 
 type Props = {
   selection: Selection;
