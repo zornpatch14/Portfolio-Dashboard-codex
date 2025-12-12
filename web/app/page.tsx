@@ -694,6 +694,9 @@ export default function HomePage() {
   }, [filesMeta]);
 
   const marginDefaultsByFile = useMemo(() => {
+    if (!availableFiles.length) {
+      return {};
+    }
     const map: Record<string, number> = {};
     availableFiles.forEach((fileId) => {
       const meta = fileMetaMap.get(fileId);
@@ -715,79 +718,46 @@ export default function HomePage() {
 
 
   const availableFilterValues = useMemo<FilterValueMap>(() => {
+    if (!availableFiles.length) {
+      return { symbols: [], intervals: [], strategies: [] };
+    }
 
     const symbolSet = new Set<string>();
-
     const intervalSet = new Set<string>();
-
     const strategySet = new Set<string>();
 
-
-
     availableFiles.forEach((fileId) => {
-
       const meta = fileMetaMap.get(fileId);
-
       const fallback = deriveFileMeta(fileId);
-
       const symbols =
-
         meta && meta.symbols.length
-
           ? meta.symbols
-
           : fallback.symbol
-
             ? [fallback.symbol]
-
             : [];
-
       const intervals =
-
         meta && meta.intervals.length
-
           ? meta.intervals
-
           : fallback.interval
-
             ? [fallback.interval]
-
             : [];
-
       const strategies =
-
         meta && meta.strategies.length
-
           ? meta.strategies
-
           : fallback.strategy
-
             ? [fallback.strategy]
-
             : [];
-
-
 
       symbols.forEach((symbol) => symbolSet.add(symbol));
-
       intervals.forEach((interval) => intervalSet.add(String(interval)));
-
       strategies.forEach((strategy) => strategySet.add(strategy));
-
     });
 
-
-
     return {
-
       symbols: Array.from(symbolSet).sort(),
-
       intervals: Array.from(intervalSet).sort((a, b) => Number(a) - Number(b)),
-
       strategies: Array.from(strategySet).sort(),
-
     };
-
   }, [availableFiles, fileMetaMap, deriveFileMeta]);
 
 
@@ -1016,117 +986,66 @@ export default function HomePage() {
   }, [optimizerJobId]);
 
   const matchesFilters = useCallback(
-
     (fileId: string) => {
+      if (!availableFiles.length) {
+        return false;
+      }
 
       const normalizedSymbols = activeSelection.symbols.map((symbol) => symbol.toUpperCase());
-
       const normalizedIntervals = activeSelection.intervals.map((interval) => String(interval));
-
       const normalizedStrategies = activeSelection.strategies.map((strategy) => strategy.toUpperCase());
-
       const meta = fileMetaMap.get(fileId);
-
       const fallback = deriveFileMeta(fileId);
-
       const fileSymbols =
-
         meta && meta.symbols.length
-
           ? meta.symbols
-
           : fallback.symbol
-
             ? [fallback.symbol]
-
             : [];
-
       const fileIntervals =
-
         meta && meta.intervals.length
-
           ? meta.intervals
-
           : fallback.interval
-
             ? [fallback.interval]
-
             : [];
-
       const fileStrategies =
-
         meta && meta.strategies.length
-
           ? meta.strategies
-
           : fallback.strategy
-
             ? [fallback.strategy]
-
             : [];
-
-
 
       const requireSymbolFilters = availableFilterValues.symbols.length > 0;
-
       const requireIntervalFilters = availableFilterValues.intervals.length > 0;
-
       const requireStrategyFilters = availableFilterValues.strategies.length > 0;
 
-
-
       const symbolMatch =
-
         !requireSymbolFilters ||
-
         (normalizedSymbols.length > 0 &&
-
           fileSymbols.length > 0 &&
-
           fileSymbols.some((symbol) => normalizedSymbols.includes(symbol.toUpperCase())));
-
       const intervalMatch =
-
         !requireIntervalFilters ||
-
         (normalizedIntervals.length > 0 &&
-
           fileIntervals.length > 0 &&
-
           fileIntervals.some((interval) => normalizedIntervals.includes(String(interval))));
-
       const strategyMatch =
-
         !requireStrategyFilters ||
-
         (normalizedStrategies.length > 0 &&
-
           fileStrategies.length > 0 &&
-
           fileStrategies.some((strategy) => normalizedStrategies.includes(strategy.toUpperCase())));
 
-
-
       return symbolMatch && intervalMatch && strategyMatch;
-
     },
-
     [
-
       activeSelection.symbols,
-
       activeSelection.intervals,
-
       activeSelection.strategies,
-
       deriveFileMeta,
-
       fileMetaMap,
-
       availableFilterValues,
-
+      availableFiles,
     ],
-
   );
 
 
