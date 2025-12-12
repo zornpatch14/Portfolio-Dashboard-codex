@@ -8,7 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .routes import correlations, cta, exports, files, metrics, optimizer, series, upload
-from .routers import demo
 from .utils.parquet_mirror import mirror_storage
 
 app = FastAPI(title="Portfolio API", version="0.1.0", docs_url="/docs")
@@ -81,4 +80,3 @@ app.include_router(correlations.router)
 app.include_router(cta.router)
 app.include_router(optimizer.router)
 app.include_router(exports.router)
-app.include_router(demo.router)
