@@ -160,25 +160,26 @@ class HistogramResponse(BaseModel):
 
 
 
-class MetricsRow(BaseModel):
+class MetricsBlock(BaseModel):
+    """Container for a cohesive set of related metrics."""
 
-    file_id: str
-
-    metric: str
-
-    value: float
-
-    level: str = "file"
-
-
+    key: str
+    label: str
+    file_id: Optional[str] = None
+    metrics: Dict[str, float | int | str | None] = Field(default_factory=dict)
 
 
 
 class MetricsResponse(BaseModel):
+    """Structured metrics payload used by /api/v1/metrics.
+
+    - `portfolio` holds the aggregated metrics for the active selection.
+    - `files` lists per-trade-file metrics using the same keys.
+    """
 
     selection: Selection
-
-    rows: List[MetricsRow]
+    portfolio: MetricsBlock
+    files: List[MetricsBlock]
 
 
 

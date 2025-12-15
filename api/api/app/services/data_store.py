@@ -8,6 +8,8 @@ import os
 
 import logging
 
+import math
+
 from datetime import datetime
 
 from pathlib import Path
@@ -53,9 +55,9 @@ from api.app.schemas import (
 
     HistogramResponse,
 
-    MetricsResponse,
+    MetricsBlock,
 
-    MetricsRow,
+    MetricsResponse,
 
     Selection,
 
@@ -146,6 +148,383 @@ def _max_drawdown(equity) -> float:
         return 0.0
 
     return float(min(val for _, val in dd))
+
+
+LEGACY_METRIC_LABELS: dict[str, str] = {
+    "total_net_profit": "Total Net Profit",
+    "gross_profit": "Gross Profit",
+    "gross_loss": "Gross Loss",
+    "profit_factor": "Profit Factor",
+    "total_trades": "Total Number of Trades",
+    "percent_profitable": "Percent Profitable",
+    "winning_trades": "Winning Trades",
+    "losing_trades": "Losing Trades",
+    "avg_trade_net_profit": "Avg. Trade Net Profit",
+    "avg_winning_trade": "Avg. Winning Trade",
+    "avg_losing_trade": "Avg. Losing Trade",
+    "ratio_avg_win_loss": "Ratio Avg. Win:Avg. Loss",
+    "largest_winning_trade": "Largest Winning Trade",
+    "largest_losing_trade": "Largest Losing Trade",
+    "max_consecutive_wins": "Max. Consecutive Winning Trades",
+    "max_consecutive_losses": "Max. Consecutive Losing Trades",
+    "max_contracts_held": "Max. Shares/Contracts Held",
+    "total_contracts_held": "Total Shares/Contracts Held",
+    "account_size_required": "Account Size Required",
+    "total_commission": "Total Commission",
+    "total_slippage": "Total Slippage",
+    "close_to_close_drawdown_value": "Max. Drawdown (Trade Close to Trade Close) Value",
+    "close_to_close_drawdown_date": "Max. Drawdown (Trade Close to Trade Close) Date",
+    "max_trade_drawdown": "Max. Trade Drawdown",
+    "intraday_peak_to_valley_drawdown_value": "Max. Drawdown (Intra-Day Peak to Valley) Value",
+    "intraday_peak_to_valley_drawdown_date": "Max. Drawdown (Intra-Day Peak to Valley) Date",
+}
+
+
+def _timestamp_to_iso(value: datetime | None) -> str | None:
+
+    if value is None:
+
+        return None
+
+    if isinstance(value, datetime):
+
+        return value.isoformat()
+
+    return str(value)
+
+
+def _max_consecutive_runs(pnl: list[float]) -> tuple[int, int]:
+
+    max_w = max_l = cur_w = cur_l = 0
+
+    for val in pnl:
+
+        if val > 0:
+
+            cur_w += 1
+
+            cur_l = 0
+
+        elif val < 0:
+
+            cur_l += 1
+
+            cur_w = 0
+
+        else:
+
+            cur_w = 0
+
+            cur_l = 0
+
+        max_w = max(max_w, cur_w)
+
+        max_l = max(max_l, cur_l)
+
+    return max_w, max_l
+
+
+def _compute_closed_trade_drawdown(trades: pl.DataFrame) -> tuple[float, datetime | None]:
+
+    if trades.is_empty() or "exit_time" not in trades.columns:
+
+        return 0.0, None
+
+    closed = trades.drop_nulls("exit_time").sort("exit_time")
+
+    if closed.is_empty():
+
+        return 0.0, None
+
+    running = 0.0
+
+    peak = float("-inf")
+
+    max_dd = 0.0
+
+    max_dd_time: datetime | None = None
+
+    for row in closed.iter_rows(named=True):
+
+        running += float(row.get("net_profit") or 0.0)
+
+        peak = running if peak == float("-inf") else max(peak, running)
+
+        dd = peak - running
+
+        if dd > max_dd:
+
+            max_dd = dd
+
+            max_dd_time = row.get("exit_time")
+
+    return float(max_dd), max_dd_time
+
+
+def _compute_intraday_p2v(trades: pl.DataFrame) -> tuple[float, datetime | None]:
+
+    if trades.is_empty() or "exit_time" not in trades.columns:
+
+        return 0.0, None
+
+    ordered = trades.drop_nulls("exit_time").sort("exit_time")
+
+    if ordered.is_empty():
+
+        return 0.0, None
+
+    base = 0.0
+
+    high_water = 0.0
+
+    max_dd = 0.0
+
+    max_dd_time: datetime | None = None
+
+    for row in ordered.iter_rows(named=True):
+
+        runup = float(row.get("runup") or 0.0)
+
+        drawdown_trade = float(row.get("drawdown_trade") or 0.0)
+
+        pnl = float(row.get("net_profit") or 0.0)
+
+        peak_candidate = base + max(0.0, runup, pnl, 0.0)
+
+        high_water = max(high_water, base, peak_candidate)
+
+        valley_candidate = base + min(0.0, drawdown_trade, pnl, 0.0)
+
+        dd = high_water - valley_candidate
+
+        if dd > max_dd:
+
+            max_dd = dd
+
+            max_dd_time = row.get("exit_time")
+
+        base += pnl
+
+    return float(max_dd), max_dd_time
+
+
+def _netpos_stats_from_intervals(intervals: pl.DataFrame) -> tuple[int, int]:
+
+    if intervals.is_empty() or "net_position" not in intervals.columns:
+
+        return 0, 0
+
+    positions = intervals["net_position"].to_list()
+
+    prev = 0.0
+
+    max_abs = 0.0
+
+    delta_sum = 0.0
+
+    for value in positions:
+
+        current = float(value or 0.0)
+
+        max_abs = max(max_abs, abs(current))
+
+        delta = current - prev
+
+        delta_sum += abs(delta)
+
+        prev = current
+
+    total_contracts = int(delta_sum / 2.0)
+
+    return int(max_abs), total_contracts
+
+
+def _netpos_stats_from_trades(trades: pl.DataFrame) -> tuple[int, int]:
+
+    if trades.is_empty():
+
+        return 0, 0
+
+    events: list[tuple[datetime, float, int]] = []
+
+    for idx, row in enumerate(trades.iter_rows(named=True)):
+
+        entry_time = row.get("entry_time")
+
+        exit_time = row.get("exit_time")
+
+        contracts = float(row.get("contracts") or 0.0)
+
+        if contracts == 0.0:
+
+            continue
+
+        direction_raw = str(row.get("direction") or "").lower()
+
+        is_long = direction_raw in {"long", "buy", "buy to open", "buy to cover"}
+
+        signed = contracts if is_long else -contracts
+
+        if entry_time is not None:
+
+            events.append((entry_time, signed, idx))
+
+        if exit_time is not None:
+
+            events.append((exit_time, -signed, idx))
+
+    if not events:
+
+        return 0, 0
+
+    events.sort(key=lambda item: (item[0], item[2]))
+
+    max_abs = 0.0
+
+    total_delta = 0.0
+
+    current = 0.0
+
+    for _, delta, _ in events:
+
+        current += float(delta)
+
+        max_abs = max(max_abs, abs(current))
+
+        total_delta += abs(delta)
+
+    return int(max_abs), int(total_delta / 2.0)
+
+
+def _build_metrics_dict(
+
+    trades: pl.DataFrame,
+
+    max_contracts: int,
+
+    total_contracts: int,
+
+    close_dd_value: float,
+
+    close_dd_time: datetime | None,
+
+    intraday_value: float,
+
+    intraday_time: datetime | None,
+
+) -> dict[str, float | int | str | None]:
+
+    metrics: dict[str, float | int | str | None] = {key: 0.0 for key in LEGACY_METRIC_LABELS}
+
+    pnl_values = trades["net_profit"].to_list() if "net_profit" in trades.columns else []
+
+    total_trades = len(pnl_values)
+
+    wins = len([val for val in pnl_values if val > 0])
+
+    losses = len([val for val in pnl_values if val < 0])
+
+    gross_profit = float(sum(val for val in pnl_values if val > 0))
+
+    gross_loss = float(sum(val for val in pnl_values if val < 0))
+
+    net_profit = gross_profit + gross_loss
+
+    avg_trade = float(net_profit / total_trades) if total_trades else 0.0
+
+    avg_win = float(gross_profit / wins) if wins else 0.0
+
+    avg_loss = float(gross_loss / losses) if losses else 0.0
+
+    ratio_aw_al = (avg_win / abs(avg_loss)) if losses and avg_loss else math.nan
+
+    largest_win = float(max(pnl_values)) if pnl_values else 0.0
+
+    largest_loss = float(min(pnl_values)) if pnl_values else 0.0
+
+    max_wins, max_losses = _max_consecutive_runs(pnl_values)
+
+    commission = float(trades["commission"].fill_null(0).sum()) if "commission" in trades.columns else 0.0
+
+    slippage = float(trades["slippage"].fill_null(0).sum()) if "slippage" in trades.columns else 0.0
+
+    drawdown_trade = float(trades["drawdown_trade"].min()) if "drawdown_trade" in trades.columns and not trades.is_empty() else 0.0
+
+    percent_profitable = (wins / total_trades * 100.0) if total_trades else 0.0
+
+    if gross_loss < 0:
+
+        profit_factor = gross_profit / abs(gross_loss) if abs(gross_loss) > 0 else 0.0
+
+    elif gross_profit > 0:
+
+        profit_factor = float("inf")
+
+    else:
+
+        profit_factor = 0.0
+
+    metrics.update(
+
+        {
+
+            "total_net_profit": net_profit,
+
+            "gross_profit": gross_profit,
+
+            "gross_loss": gross_loss,
+
+            "profit_factor": profit_factor,
+
+            "total_trades": float(total_trades),
+
+            "percent_profitable": percent_profitable,
+
+            "winning_trades": float(wins),
+
+            "losing_trades": float(losses),
+
+            "avg_trade_net_profit": avg_trade,
+
+            "avg_winning_trade": avg_win,
+
+            "avg_losing_trade": avg_loss,
+
+            "ratio_avg_win_loss": ratio_aw_al,
+
+            "largest_winning_trade": largest_win,
+
+            "largest_losing_trade": largest_loss,
+
+            "max_consecutive_wins": float(max_wins),
+
+            "max_consecutive_losses": float(max_losses),
+
+            "max_contracts_held": float(max_contracts),
+
+            "total_contracts_held": float(total_contracts),
+
+            "account_size_required": close_dd_value,
+
+            "total_commission": commission,
+
+            "total_slippage": slippage,
+
+            "close_to_close_drawdown_value": -close_dd_value,
+
+            "close_to_close_drawdown_date": _timestamp_to_iso(close_dd_time),
+
+            "max_trade_drawdown": drawdown_trade,
+
+            "intraday_peak_to_valley_drawdown_value": -intraday_value,
+
+            "intraday_peak_to_valley_drawdown_date": _timestamp_to_iso(intraday_time),
+
+        }
+
+    )
+
+    return metrics
 
 
 
@@ -1028,37 +1407,10 @@ class DataStore:
 
     def metrics(self, selection: Selection) -> MetricsResponse:
         metas = self._metas_for_selection(selection)
-        paths = [Path(m.trades_path) for m in metas]
         loaded_trades = self._load_trades_map(metas)
-        rows: list[MetricsRow] = []
         direction = selection.direction
-        account_equity = selection.account_equity if selection.account_equity is not None else self.cache.starting_equity
-        equity_delta = account_equity - self.cache.starting_equity
-
-        def _filter_direction(df: pl.DataFrame) -> pl.DataFrame:
-            if not direction or "direction" not in df.columns:
-                return df
-            dir_norm = direction.lower()
-
-            dir_col = pl.col("direction").cast(pl.Utf8).str.to_lowercase()
-
-            if dir_norm == "long":
-
-                mask = dir_col.is_in(["long", "buy", "buy to open", "buy to cover"])
-
-            elif dir_norm == "short":
-
-                mask = dir_col.is_in(["short", "sell short", "sell", "sell to open", "sell to cover"])
-
-            else:
-
-                return df
-
-            return df.filter(mask)
-
-
-
-        # Per-file metrics
+        file_blocks: list[MetricsBlock] = []
+        combined_trades: list[pl.DataFrame] = []
 
         for meta in metas:
             path = Path(meta.trades_path)
@@ -1066,82 +1418,63 @@ class DataStore:
             marg = selection.margin_overrides.get(meta.file_id)
             loaded = loaded_trades.get(meta.file_id)
             if loaded is None:
-
                 loaded = self.cache.load_trades(path)
-
                 loaded_trades[meta.file_id] = loaded
 
+            trades_df = self.cache._filter_by_direction(loaded.trades, direction)
+            if cmult is not None:
+                trades_df = self.cache._apply_contract_multiplier(trades_df, float(cmult))
+            combined_trades.append(trades_df)
 
+            intervals = self.cache.net_position_intervals(
+                path,
+                contract_multiplier=cmult,
+                margin_override=marg,
+                direction=direction,
+                loaded=loaded,
+                file_id=meta.file_id,
+            )
+            max_contracts, total_contracts = _netpos_stats_from_intervals(intervals)
+            close_dd_value, close_dd_time = _compute_closed_trade_drawdown(trades_df)
+            intraday_value, intraday_time = _compute_intraday_p2v(trades_df)
+            metrics_map = _build_metrics_dict(
+                trades_df,
+                max_contracts=max_contracts,
+                total_contracts=total_contracts,
+                close_dd_value=close_dd_value,
+                close_dd_time=close_dd_time,
+                intraday_value=intraday_value,
+                intraday_time=intraday_time,
+            )
+            label = meta.original_filename or meta.filename or path.stem
+            file_blocks.append(
+                MetricsBlock(
+                    key=meta.file_id,
+                    file_id=meta.file_id,
+                    label=label,
+                    metrics=metrics_map,
+                )
+            )
 
-            equity = self.cache.equity_curve(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=meta.file_id)
-            if equity_delta != 0:
-                equity = equity.with_columns((pl.col("equity") + equity_delta).alias("equity"))
-            trades_df = _filter_direction(loaded.trades)
-            daily = self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=meta.file_id)
+        if combined_trades:
+            combined = pl.concat(combined_trades, how="diagonal")
+        else:
+            combined = pl.DataFrame()
+        portfolio_max, portfolio_total = _netpos_stats_from_trades(combined)
+        portfolio_close_dd, portfolio_close_time = _compute_closed_trade_drawdown(combined)
+        portfolio_intraday_dd, portfolio_intraday_time = _compute_intraday_p2v(combined)
+        portfolio_metrics = _build_metrics_dict(
+            combined,
+            max_contracts=portfolio_max,
+            total_contracts=portfolio_total,
+            close_dd_value=portfolio_close_dd,
+            close_dd_time=portfolio_close_time,
+            intraday_value=portfolio_intraday_dd,
+            intraday_time=portfolio_intraday_time,
+        )
 
-            net_profit = float(equity["equity"][-1] - account_equity) if len(equity) else 0.0
-            trades = len(trades_df)
-
-            wins = int((trades_df["net_profit"] > 0).sum()) if trades else 0
-
-            win_rate = (wins / trades * 100.0) if trades else 0.0
-
-            expectancy = (net_profit / trades) if trades else 0.0
-
-            max_dd = _max_drawdown(equity)
-
-            avg_daily = float(daily["daily_return"].mean()) if len(daily) else 0.0
-
-
-
-            def add(metric: str, value: float) -> None:
-
-                rows.append(MetricsRow(file_id=path.stem, metric=metric, value=value, level="file"))
-
-
-
-            add("net_profit", net_profit)
-
-            add("trades", float(trades))
-
-            add("max_drawdown", max_dd)
-
-            add("win_rate", win_rate)
-
-            add("expectancy", expectancy)
-
-            add("avg_daily_return", avg_daily)
-
-
-
-        # Portfolio metrics
-
-        view = self._view_for_selection(selection, metas=metas, loaded_trades=loaded_trades)
-        if len(view.equity):
-            portfolio_net = float(view.equity["equity"][-1] - account_equity)
-            port_dd = _max_drawdown(view.equity)
-
-            port_daily = float(view.daily_returns["daily_return"].mean()) if len(view.daily_returns) else 0.0
-
-            dir_trades = sum(len(_filter_direction(loaded_trades[p.stem].trades)) for p in paths)
-
-            def addp(metric: str, value: float) -> None:
-
-                rows.append(MetricsRow(file_id="portfolio", metric=metric, value=value, level="portfolio"))
-
-
-
-            addp("net_profit", portfolio_net)
-
-            addp("trades", float(dir_trades))
-
-            addp("max_drawdown", port_dd)
-
-            addp("avg_daily_return", port_daily)
-
-
-
-        return MetricsResponse(selection=selection, rows=rows)
+        portfolio_block = MetricsBlock(key="portfolio", label="Portfolio", metrics=portfolio_metrics)
+        return MetricsResponse(selection=selection, portfolio=portfolio_block, files=file_blocks)
 
     # ---------------- optimizer helpers ----------------
 
@@ -1200,4 +1533,3 @@ class DataStore:
         return combined, metas
 
 store = DataStore()
-
