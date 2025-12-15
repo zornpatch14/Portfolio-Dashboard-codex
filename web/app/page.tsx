@@ -1883,7 +1883,14 @@ export default function HomePage() {
     return { netProfit, drawdown, totalTrades, winRate };
 
   }, [metricsQuery.data, metricsRequested]);
-  const metricsBlocks = metricsQuery.data?.files ?? [];
+  const metricsBlocks = useMemo(() => {
+    if (!metricsRequested || !metricsQuery.data) return [];
+    const { portfolio, files } = metricsQuery.data;
+    const ordered = [];
+    if (portfolio) ordered.push(portfolio);
+    if (files?.length) ordered.push(...files);
+    return ordered;
+  }, [metricsQuery.data, metricsRequested]);
 
 
 
