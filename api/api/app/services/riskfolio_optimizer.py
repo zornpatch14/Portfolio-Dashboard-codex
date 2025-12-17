@@ -387,8 +387,8 @@ class MeanRiskOptimizer:
     ) -> BacktestSeries:
         aligned = returns.reindex(columns=weights.index).fillna(0.0)
         port_returns = aligned.to_numpy() @ weights.to_numpy().reshape((-1, 1))
-        compounded = np.cumprod(1.0 + port_returns.flatten())
-        values = capital * compounded
+        cumulative = np.cumsum(port_returns.flatten())
+        values = capital * (1.0 + cumulative)
         points = [
             SeriesPoint(timestamp=pd.Timestamp(idx).to_pydatetime(), value=float(val))
             for idx, val in zip(aligned.index, values)
