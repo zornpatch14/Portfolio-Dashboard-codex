@@ -382,6 +382,7 @@ export default function HomePage() {
   const accountEquity = activeSelection.accountEquity ?? selectionMeta?.account_equity ?? ACCOUNT_EQUITY_FALLBACK;
   const [riskfolioContractEquity, setRiskfolioContractEquity] = useState(accountEquity);
   const [selectedFrontierIdx, setSelectedFrontierIdx] = useState<number | null>(null);
+  const [metricsRequested, setMetricsRequested] = useState(false);
 
   const optimizerResult = optimizerStatus?.result ?? null;
   const optimizerWeights = optimizerResult?.weights ?? [];
@@ -1191,6 +1192,9 @@ export default function HomePage() {
     setOptimizerError(null);
     setOptimizerLoading(false);
   }, [selectionKey]);
+  useEffect(() => {
+    setMetricsRequested(false);
+  }, [selectionKey]);
 
   const handleOverrideChange = useCallback((fileId: string, field: 'min' | 'max', value: string) => {
     const sanitizedValue = sanitizeWeightInputString(value);
@@ -1412,13 +1416,13 @@ export default function HomePage() {
 
   const metricsQuery = useQuery({
 
-    queryKey: ['metrics', selectionKey],
+    queryKey: ['metrics', selectionKey, metricsRequested],
 
     queryFn: () => fetchMetrics(selectionForFetch),
 
     staleTime: STALE_TIME,
 
-    enabled: canQueryData,
+    enabled: canQueryData && metricsRequested,
 
   });
 
@@ -1862,37 +1866,31 @@ export default function HomePage() {
 
   const metricsSummary = useMemo(() => {
 
-    const rows = metricsQuery.data || [];
+    if (!metricsRequested) return null;
 
-    if (!rows.length) return null;
+    const portfolioMetrics = metricsQuery.data?.portfolio?.metrics;
 
-    const totals = rows.reduce(
+    if (!portfolioMetrics) return null;
 
-      (acc, row) => {
+    const netProfit = coerceNumber(portfolioMetrics.total_net_profit, 0);
 
-        acc.netProfit += row.netProfit;
+    const drawdown = coerceNumber(portfolioMetrics.close_to_close_drawdown_value, 0);
 
-        acc.drawdown += row.drawdown;
+    const totalTrades = coerceNumber(portfolioMetrics.total_trades, 0);
 
-        acc.trades += row.trades;
+    const winRate = coerceNumber(portfolioMetrics.percent_profitable, 0);
 
-        acc.winRate += row.winRate;
+    return { netProfit, drawdown, totalTrades, winRate };
 
-        return acc;
-
-      },
-
-      { netProfit: 0, drawdown: 0, trades: 0, winRate: 0 },
-
-    );
-
-    const avgWin = totals.winRate / rows.length;
-
-    const avgTrades = Math.round(totals.trades / rows.length);
-
-    return { netProfit: totals.netProfit, drawdown: totals.drawdown, avgWin, avgTrades };
-
-  }, [metricsQuery.data]);
+  }, [metricsQuery.data, metricsRequested]);
+  const metricsBlocks = useMemo(() => {
+    if (!metricsRequested || !metricsQuery.data) return [];
+    const { portfolio, files } = metricsQuery.data;
+    const ordered = [];
+    if (portfolio) ordered.push(portfolio);
+    if (files?.length) ordered.push(...files);
+    return ordered;
+  }, [metricsQuery.data, metricsRequested]);
 
 
 
@@ -1927,6 +1925,15 @@ export default function HomePage() {
     </div>
 
   );
+  const handleMetricsComputation = () => {
+
+    if (!canQueryData) return;
+
+    setMetricsRequested(true);
+
+    void metricsQuery.refetch();
+
+  };
 
 
 
@@ -1958,33 +1965,33 @@ export default function HomePage() {
 
         <div className="metric-card">
 
-          <span className="text-muted small">Net Profit (sum)</span>
+          <span className="text-muted small">Net Profit (portfolio)</span>
 
-          <strong>{metricsSummary ? `$${metricsSummary.netProfit.toLocaleString()}` : '--'}</strong>
-
-        </div>
-
-        <div className="metric-card">
-
-          <span className="text-muted small">Drawdown (sum)</span>
-
-          <strong>{metricsSummary ? `$${metricsSummary.drawdown.toLocaleString()}` : '--'}</strong>
+          <strong>{metricsSummary ? formatCurrency(metricsSummary.netProfit) : '--'}</strong>
 
         </div>
 
         <div className="metric-card">
 
-          <span className="text-muted small">Avg Trades</span>
+          <span className="text-muted small">Close-to-close Drawdown</span>
 
-          <strong>{metricsSummary ? metricsSummary.avgTrades : '--'}</strong>
+          <strong>{metricsSummary ? formatCurrency(metricsSummary.drawdown) : '--'}</strong>
 
         </div>
 
         <div className="metric-card">
 
-          <span className="text-muted small">Avg Win %</span>
+          <span className="text-muted small">Total Trades</span>
 
-          <strong>{metricsSummary ? `${metricsSummary.avgWin.toFixed(1)}%` : '--'}</strong>
+          <strong>{metricsSummary ? metricsSummary.totalTrades.toLocaleString() : '--'}</strong>
+
+        </div>
+
+        <div className="metric-card">
+
+          <span className="text-muted small">Win %</span>
+
+          <strong>{metricsSummary ? `${metricsSummary.winRate.toFixed(1)}%` : '--'}</strong>
 
         </div>
 
@@ -2186,13 +2193,21 @@ export default function HomePage() {
 
         <h3 className="section-title">Per-file metrics</h3>
 
-        {metricsQuery.isError ? (
+        {!metricsRequested ? (
+
+          <div className="placeholder-text">Compute metrics from the Metrics tab to populate this table.</div>
+
+        ) : metricsQuery.isError ? (
 
           <div className="placeholder-text">{getQueryErrorMessage(metricsQuery.error)}</div>
 
-        ) : metricsQuery.data && metricsQuery.data.length ? (
+        ) : metricsBlocks.length ? (
 
-          <MetricsGrid rows={metricsQuery.data} />
+          <MetricsGrid blocks={metricsBlocks} />
+
+        ) : metricsQuery.isFetching ? (
+
+          <div className="placeholder-text">Computing metrics...</div>
 
         ) : (
 
@@ -3502,19 +3517,53 @@ export default function HomePage() {
 
         <h3 className="section-title" style={{ margin: 0 }}>Metrics</h3>
 
-        {activeBadge}
+        <div className="flex" style={{ gap: 8, alignItems: 'center' }}>
+
+          <button
+
+            type="button"
+
+            className="button"
+
+            onClick={handleMetricsComputation}
+
+            disabled={!canQueryData || metricsQuery.isFetching}
+
+          >
+
+            {metricsQuery.isFetching ? 'Computing...' : metricsRequested ? 'Refresh Metrics' : 'Compute Metrics'}
+
+          </button>
+
+          {metricsRequested && activeBadge}
+
+        </div>
+
+      </div>
+
+      <div className="text-muted small" style={{ marginTop: 6 }}>
+
+        Metrics are computed on demand using the active filters, overrides, and account equity.
 
       </div>
 
       <div style={{ marginTop: 12 }}>
 
-        {metricsQuery.isError ? (
+        {!metricsRequested ? (
+
+          <div className="placeholder-text">Click "Compute Metrics" to generate the table.</div>
+
+        ) : metricsQuery.isError ? (
 
           <div className="placeholder-text">{getQueryErrorMessage(metricsQuery.error)}</div>
 
-        ) : metricsQuery.data && metricsQuery.data.length ? (
+        ) : metricsBlocks.length ? (
 
-          <MetricsGrid rows={metricsQuery.data} />
+          <MetricsGrid blocks={metricsBlocks} />
+
+        ) : metricsQuery.isFetching ? (
+
+          <div className="placeholder-text">Computing metrics...</div>
 
         ) : (
 
@@ -4233,7 +4282,9 @@ export default function HomePage() {
 
               histogramQuery.refetch();
 
-              metricsQuery.refetch();
+              if (metricsRequested) {
+                metricsQuery.refetch();
+              }
 
 
           

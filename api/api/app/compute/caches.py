@@ -140,6 +140,26 @@ class PerFileCache:
             file_id=file_id,
         )
 
+    def _netpos_interval_artifact(
+        self,
+        path: Path,
+        contract_multiplier: float | None = None,
+        margin_override: float | None = None,
+        direction: str | None = None,
+        loaded: LoadedTrades | None = None,
+        file_id: str | None = None,
+    ) -> pl.DataFrame:
+        return self._get_or_build(
+            path,
+            "intervals",
+            lambda loaded: self._netpos_intervals(loaded, contract_multiplier, margin_override, None, None, direction)[1],
+            contract_multiplier,
+            margin_override,
+            direction,
+            loaded=loaded,
+            file_id=file_id,
+        )
+
     def net_position(
         self,
         path: Path,
@@ -151,17 +171,35 @@ class PerFileCache:
     ) -> pl.DataFrame:
         """Return point-in-time net position series; cache intervals when no overrides applied."""
 
-        intervals = self._get_or_build(
+        intervals = self._netpos_interval_artifact(
             path,
-            "intervals",
-            lambda loaded: self._netpos_intervals(loaded, contract_multiplier, margin_override, None, None, direction)[1],
-            contract_multiplier,
-            margin_override,
-            direction,
+            contract_multiplier=contract_multiplier,
+            margin_override=margin_override,
+            direction=direction,
             loaded=loaded,
             file_id=file_id,
         )
         return intervals.select(pl.col("start").alias("timestamp"), pl.col("net_position"))
+
+    def net_position_intervals(
+        self,
+        path: Path,
+        contract_multiplier: float | None = None,
+        margin_override: float | None = None,
+        direction: str | None = None,
+        loaded: LoadedTrades | None = None,
+        file_id: str | None = None,
+    ) -> pl.DataFrame:
+        """Expose cached net-position intervals so downstream metrics can reuse them."""
+
+        return self._netpos_interval_artifact(
+            path,
+            contract_multiplier=contract_multiplier,
+            margin_override=margin_override,
+            direction=direction,
+            loaded=loaded,
+            file_id=file_id,
+        )
 
     def margin_usage(
         self,
@@ -174,13 +212,11 @@ class PerFileCache:
     ) -> pl.DataFrame:
         """Return margin usage intervals (timestamp=interval start) with caching when no overrides."""
 
-        intervals = self._get_or_build(
+        intervals = self._netpos_interval_artifact(
             path,
-            "intervals",
-            lambda loaded: self._netpos_intervals(loaded, contract_multiplier, margin_override, None, None, direction)[1],
-            contract_multiplier,
-            margin_override,
-            direction,
+            contract_multiplier=contract_multiplier,
+            margin_override=margin_override,
+            direction=direction,
             loaded=loaded,
             file_id=file_id,
         )
@@ -649,4 +685,3 @@ class PerFileCache:
         if not samples:
             return pl.DataFrame({"timestamp": [], "net_position": [], "margin_used": [], "symbol": []})
         return pl.concat(samples).sort("timestamp")
-

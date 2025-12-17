@@ -97,22 +97,17 @@ export type HistogramResponse = {
 
 
 
-export type MetricsRow = {
+export type MetricsBlock = {
+  key: string;
+  label: string;
+  fileId?: string | null;
+  metrics: Record<string, number | string | null>;
+};
 
-  scope: string;
-
-  netProfit: number;
-
-  drawdown: number;
-
-  trades: number;
-
-  winRate: number;
-
-  expectancy: number;
-
-  exposure: number;
-
+export type MetricsResponse = {
+  selection: Selection;
+  portfolio: MetricsBlock;
+  files: MetricsBlock[];
 };
 
 
@@ -473,7 +468,7 @@ export async function fetchMetrics(selection: Selection) {
 
   }
 
-  return (await response.json()) as MetricsRow[];
+  return (await response.json()) as MetricsResponse;
 
 }
 
