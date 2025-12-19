@@ -895,6 +895,11 @@ class DataStore:
                 contributors=list(built.contributors),
                 spikes=built.spikes.clone() if built.spikes is not None else None,
             )
+            exposure_netpos, exposure_margin = self._build_portfolio_daily_exposure_frames(
+                selection, metas, trades_map
+            )
+            view.net_position = exposure_netpos
+            view.margin = exposure_margin
 
             self._portfolio_cache[key] = view
 
@@ -1346,6 +1351,47 @@ class DataStore:
         if exposure_view not in {"portfolio_daily", "portfolio_step", "per_symbol", "per_file"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid exposure_view")
 
+        def filter_points(frame: pl.DataFrame, column: str) -> pl.DataFrame:
+            start_dt = selection.start_date
+            end_dt = selection.end_date
+            if not start_dt and not end_dt:
+                return frame
+            if frame.is_empty():
+                return frame
+            start_bound = datetime.combine(start_dt, datetime.min.time()) if start_dt else None
+            end_bound = datetime.combine(end_dt, datetime.max.time()) if end_dt else None
+            out = frame
+            if start_bound:
+                out = out.filter(pl.col(column) >= start_bound)
+            if end_bound:
+                out = out.filter(pl.col(column) <= end_bound)
+            return out
+
+        if exposure_view == "portfolio_daily":
+            cache_key = build_selection_key(selection_hash(selection), selection.data_version, "portfolio")
+            cached_view = self._load_portfolio_from_cache(cache_key)
+            if cached_view is not None:
+                cached_frame = cached_view.net_position if series_name == "netpos" else cached_view.margin
+                if not cached_frame.is_empty():
+                    value_col = "net_position" if series_name == "netpos" else "margin_used"
+                    cached_frame = filter_points(cached_frame, "timestamp")
+                    downsampled_frame, raw, sampled = self._downsample_frame_for_series(
+                        cached_frame, "timestamp", value_col, downsample
+                    )
+                    portfolio_points = self._to_points(
+                        downsampled_frame.iter_rows(named=True), "timestamp", value_col
+                    )
+                    label = "netpos" if series_name == "netpos" else "margin"
+                    return SeriesResponse(
+                        series=label,
+                        selection=selection,
+                        downsampled=downsample,
+                        raw_count=raw,
+                        downsampled_count=sampled,
+                        portfolio=portfolio_points,
+                        per_file=[],
+                    )
+
         metas = self._metas_for_selection(selection)
         loaded_trades = self._load_trades_map(metas)
         intervals_frames: list[pl.DataFrame] = []
@@ -1470,22 +1516,6 @@ class DataStore:
                 pl.col("date").cast(pl.Datetime).alias("timestamp")
             ).select("timestamp", value_col)
 
-        def filter_points(frame: pl.DataFrame, column: str, is_date: bool = False) -> pl.DataFrame:
-            start_dt = selection.start_date
-            end_dt = selection.end_date
-            if not start_dt and not end_dt:
-                return frame
-            if frame.is_empty():
-                return frame
-            start_bound = start_dt if is_date else datetime.combine(start_dt, datetime.min.time()) if start_dt else None
-            end_bound = end_dt if is_date else datetime.combine(end_dt, datetime.max.time()) if end_dt else None
-            out = frame
-            if start_bound:
-                out = out.filter(pl.col(column) >= start_bound)
-            if end_bound:
-                out = out.filter(pl.col(column) <= end_bound)
-            return out
-
         per_file_points = filter_points(per_file_points, "timestamp")
         per_symbol_points = filter_points(per_symbol_points, "timestamp")
         portfolio_frame = filter_points(portfolio_frame, "timestamp")
@@ -1587,6 +1617,94 @@ class DataStore:
                 )
             )
         return lines
+
+    def _build_exposure_intervals(
+        self,
+        selection: Selection,
+        metas: list[TradeFileMetadata],
+        loaded_trades: dict[str, LoadedTrades],
+    ) -> pl.DataFrame:
+        intervals_frames: list[pl.DataFrame] = []
+        for meta in metas:
+            path = Path(meta.trades_path)
+            cmult = selection.contract_multipliers.get(meta.file_id)
+            marg = selection.margin_overrides.get(meta.file_id)
+            loaded = loaded_trades.get(meta.file_id)
+            intervals = self.cache.net_position_intervals(
+                path,
+                contract_multiplier=cmult,
+                margin_override=marg,
+                direction=selection.direction,
+                loaded=loaded,
+                file_id=meta.file_id,
+            )
+            if intervals.is_empty():
+                continue
+            intervals = intervals.with_columns(
+                pl.lit(meta.file_id).alias("file_id"),
+                pl.lit(meta.symbol.upper() if meta.symbol else None).alias("symbol"),
+            )
+            intervals_frames.append(intervals)
+        if intervals_frames:
+            return pl.concat(intervals_frames)
+        return pl.DataFrame(
+            {
+                "start": [],
+                "end": [],
+                "symbol": [],
+                "net_position": [],
+                "margin_used": [],
+                "file_id": [],
+            }
+        )
+
+    def _build_portfolio_daily_exposure_frames(
+        self,
+        selection: Selection,
+        metas: list[TradeFileMetadata],
+        loaded_trades: dict[str, LoadedTrades],
+    ) -> tuple[pl.DataFrame, pl.DataFrame]:
+        intervals = self._build_exposure_intervals(selection, metas, loaded_trades)
+        if intervals.is_empty():
+            empty_netpos = pl.DataFrame({"timestamp": [], "net_position": []})
+            empty_margin = pl.DataFrame({"timestamp": [], "margin_used": []})
+            return empty_netpos, empty_margin
+
+        end_time = intervals["end"].max()
+        symbol_positions = build_symbol_positions(intervals, file_col="file_id", value_col="net_position")
+
+        netpos_daily = build_portfolio_daily_max(
+            symbol_positions, end_time=end_time, value_col="net_position"
+        )
+        netpos_frame = netpos_daily.with_columns(
+            pl.col("date").cast(pl.Datetime).alias("timestamp")
+        ).select("timestamp", "net_position")
+
+        margin_per_contract = (
+            intervals.filter(pl.col("net_position") != 0)
+            .with_columns(
+                (pl.col("margin_used") / pl.col("net_position").abs()).alias("margin_per_contract")
+            )
+            .group_by("symbol")
+            .agg(pl.col("margin_per_contract").max().alias("margin_per_contract"))
+        )
+        symbol_margin_positions = (
+            symbol_positions.join(margin_per_contract, on="symbol", how="left")
+            .with_columns(
+                (pl.col("net_position").abs() * pl.col("margin_per_contract").fill_null(0.0)).alias(
+                    "margin_used"
+                )
+            )
+            .select("symbol", "timestamp", "margin_used")
+        )
+        margin_daily = build_portfolio_daily_max(
+            symbol_margin_positions, end_time=end_time, value_col="margin_used"
+        )
+        margin_frame = margin_daily.with_columns(
+            pl.col("date").cast(pl.Datetime).alias("timestamp")
+        ).select("timestamp", "margin_used")
+
+        return netpos_frame, margin_frame
 
 
 
