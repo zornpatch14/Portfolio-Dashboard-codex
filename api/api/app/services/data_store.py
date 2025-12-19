@@ -1561,24 +1561,25 @@ class DataStore:
         groups = points.partition_by("file_id", as_dict=True)
         lines: list[SeriesContributor] = []
         for file_id, group in groups.items():
+            file_key = file_id[0] if isinstance(file_id, tuple) and len(file_id) == 1 else file_id
             frame = group.select(pl.col("timestamp"), pl.col(value_col))
             downsampled, _, _ = self._downsample_frame_for_series(frame, "timestamp", value_col, downsample)
-            meta_row = meta.filter(pl.col("file_id") == file_id)
+            meta_row = meta.filter(pl.col("file_id") == file_key)
             if meta_row.is_empty():
-                label = file_id
+                label = file_key
                 symbol = None
                 interval = None
                 strategy = None
             else:
                 row = meta_row.to_dicts()[0]
-                label = row.get("label") or file_id
+                label = row.get("label") or file_key
                 symbol = row.get("symbol")
                 interval = row.get("interval")
                 strategy = row.get("strategy")
             points_out = self._to_points(downsampled.iter_rows(named=True), "timestamp", value_col)
             lines.append(
                 SeriesContributor(
-                    contributor_id=str(file_id),
+                    contributor_id=str(file_key),
                     label=label,
                     symbol=symbol,
                     interval=interval,
@@ -1600,15 +1601,16 @@ class DataStore:
         groups = points.partition_by("symbol", as_dict=True)
         lines: list[SeriesContributor] = []
         for symbol, group in groups.items():
+            symbol_key = symbol[0] if isinstance(symbol, tuple) and len(symbol) == 1 else symbol
             frame = group.select(pl.col("timestamp"), pl.col(value_col))
             downsampled, _, _ = self._downsample_frame_for_series(frame, "timestamp", value_col, downsample)
             points_out = self._to_points(downsampled.iter_rows(named=True), "timestamp", value_col)
-            label = str(symbol) if symbol is not None else "unknown"
+            label = str(symbol_key) if symbol_key is not None else "unknown"
             lines.append(
                 SeriesContributor(
                     contributor_id=label,
                     label=label,
-                    symbol=symbol,
+                    symbol=symbol_key,
                     interval=None,
                     strategy=None,
                     points=points_out,
