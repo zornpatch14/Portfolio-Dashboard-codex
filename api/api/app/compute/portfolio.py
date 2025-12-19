@@ -58,8 +58,6 @@ class PortfolioView:
     equity: pl.DataFrame
     daily_percent_portfolio: pl.DataFrame
     daily_returns: pl.DataFrame
-    net_position: pl.DataFrame
-    margin: pl.DataFrame
     contributors: list[ContributorSeries]
     spikes: pl.DataFrame | None = None
 
@@ -98,16 +96,12 @@ class PortfolioAggregator:
         if not files:
             empty_equity = pl.DataFrame({"timestamp": [], "equity": []})
             empty_daily = pl.DataFrame({"date": [], "pnl": [], "capital": [], "daily_return": []})
-            empty_netpos = pl.DataFrame({"timestamp": [], "net_position": []})
-            empty_margin = pl.DataFrame({"timestamp": [], "margin_used": []})
             return PortfolioView(
                 equity=empty_equity,
                 daily_percent_portfolio=pl.DataFrame(
                     {"date": [], "pnl": [], "capital": [], "daily_pct": [], "cum_pct": []}
                 ),
                 daily_returns=empty_daily,
-                net_position=empty_netpos,
-                margin=empty_margin,
                 contributors=[],
                 spikes=pl.DataFrame({"timestamp": [], "marker_value": [], "drawdown": [], "runup": [], "trade_no": []})
                 if include_spikes
@@ -137,12 +131,6 @@ class PortfolioAggregator:
 
 
         daily_frames = [c.bundle.daily_returns for c in contributors]
-
-        netpos_frames = [c.bundle.net_position for c in contributors]
-
-        margin_frames = [c.bundle.margin for c in contributors]
-
-
 
         combined_daily = pl.concat(daily_frames).group_by("date").agg(
 
@@ -179,9 +167,6 @@ class PortfolioAggregator:
 
 
         portfolio_percent = _combine_daily_percent(contributors)
-        netpos = _combine_timeseries(netpos_frames, "net_position")
-
-        margin = _combine_timeseries(margin_frames, "margin_used")
 
         spikes_df = None
 
@@ -197,8 +182,6 @@ class PortfolioAggregator:
             equity=equity_curve,
             daily_percent_portfolio=portfolio_percent,
             daily_returns=combined_daily,
-            net_position=netpos,
-            margin=margin,
             contributors=contributors,
             spikes=spikes_df,
         )
@@ -300,10 +283,6 @@ class PortfolioAggregator:
 
             daily = self.cache.daily_returns(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=file_id)
 
-            netpos = self.cache.net_position(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=file_id)
-
-            margin_usage = self.cache.margin_usage(path, contract_multiplier=cmult, margin_override=marg, direction=direction, loaded=loaded, file_id=file_id)
-
             spikes_df = (
 
                 self.cache.spike_overlay(path, contract_multiplier=cmult, direction=direction, loaded=loaded, file_id=file_id)
@@ -327,8 +306,6 @@ class PortfolioAggregator:
                         equity=equity,
                         daily_returns=daily,
                         daily_percent=daily_percent,
-                        net_position=netpos,
-                        margin=margin_usage,
                         spikes=spikes_df,
                     ),
                     label=label,
@@ -347,22 +324,6 @@ class PortfolioAggregator:
         return downsample_timeseries(view.equity, "timestamp", "equity", target_points=target_points)
 
 
-
-
-
-def _combine_timeseries(frames: list[pl.DataFrame], value_col: str) -> pl.DataFrame:
-
-    if not frames:
-
-        return pl.DataFrame({"timestamp": [], value_col: []})
-
-
-
-    stacked = pl.concat(frames).sort("timestamp")
-
-    combined = stacked.group_by("timestamp").agg(pl.col(value_col).sum()).sort("timestamp")
-
-    return combined
 
 
 

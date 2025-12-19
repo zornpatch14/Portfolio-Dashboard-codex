@@ -558,6 +558,7 @@ class DataStore:
         self.aggregator = PortfolioAggregator(self.cache)
 
         self._portfolio_cache: dict[str, PortfolioView] = {}
+        self._portfolio_exposure_cache: dict[str, tuple[pl.DataFrame, pl.DataFrame]] = {}
 
         self._backend = get_cache_backend()
 
@@ -890,20 +891,17 @@ class DataStore:
                 equity=built.equity.clone(),
                 daily_percent_portfolio=built.daily_percent_portfolio.clone(),
                 daily_returns=built.daily_returns.clone(),
-                net_position=built.net_position.clone(),
-                margin=built.margin.clone(),
                 contributors=list(built.contributors),
                 spikes=built.spikes.clone() if built.spikes is not None else None,
             )
             exposure_netpos, exposure_margin = self._build_portfolio_daily_exposure_frames(
                 selection, metas, trades_map
             )
-            view.net_position = exposure_netpos
-            view.margin = exposure_margin
 
             self._portfolio_cache[key] = view
 
-            self._persist_portfolio_to_cache(cache_key, view)
+            self._portfolio_exposure_cache[cache_key] = (exposure_netpos, exposure_margin)
+            self._persist_portfolio_to_cache(cache_key, view, exposure_netpos, exposure_margin)
 
 
 
@@ -912,7 +910,13 @@ class DataStore:
         return self._filter_view_by_date(view, selection)
 
 
-    def _persist_portfolio_to_cache(self, cache_key: str, view: PortfolioView) -> None:
+    def _persist_portfolio_to_cache(
+        self,
+        cache_key: str,
+        view: PortfolioView,
+        net_position: pl.DataFrame,
+        margin: pl.DataFrame,
+    ) -> None:
 
         try:
 
@@ -938,8 +942,8 @@ class DataStore:
                 "equity": to_bytes(view.equity),
                 "daily_percent": to_bytes(view.daily_percent_portfolio),
                 "daily_returns": to_bytes(view.daily_returns),
-                "net_position": to_bytes(view.net_position),
-                "margin": to_bytes(view.margin),
+                "net_position": to_bytes(net_position),
+                "margin": to_bytes(margin),
                 "spikes": to_bytes(view.spikes) if view.spikes is not None else None,
             }
 
@@ -1007,12 +1011,11 @@ class DataStore:
                 or margin is None
             ):
                 return None
+            self._portfolio_exposure_cache[cache_key] = (netpos, margin)
             return PortfolioView(
                 equity=equity,
                 daily_percent_portfolio=daily_percent,
                 daily_returns=daily,
-                net_position=netpos,
-                margin=margin,
                 contributors=[],
                 spikes=spikes,
             )
@@ -1066,10 +1069,6 @@ class DataStore:
         view.equity = filter_frame(view.equity, "timestamp")
         view.daily_percent_portfolio = filter_frame(view.daily_percent_portfolio, "date", is_date=True)
 
-        view.net_position = filter_frame(view.net_position, "timestamp")
-
-        view.margin = filter_frame(view.margin, "timestamp")
-
         if view.spikes is not None:
 
             view.spikes = filter_frame(view.spikes, "timestamp")
@@ -1081,10 +1080,6 @@ class DataStore:
         for contributor in view.contributors:
 
             contributor.bundle.equity = filter_frame(contributor.bundle.equity, "timestamp")
-
-            contributor.bundle.net_position = filter_frame(contributor.bundle.net_position, "timestamp")
-
-            contributor.bundle.margin = filter_frame(contributor.bundle.margin, "timestamp")
 
             contributor.bundle.spikes = filter_frame(contributor.bundle.spikes, "timestamp")
 
@@ -1369,9 +1364,12 @@ class DataStore:
 
         if exposure_view == "portfolio_daily":
             cache_key = build_selection_key(selection_hash(selection), selection.data_version, "portfolio")
-            cached_view = self._load_portfolio_from_cache(cache_key)
-            if cached_view is not None:
-                cached_frame = cached_view.net_position if series_name == "netpos" else cached_view.margin
+            cached = self._portfolio_exposure_cache.get(cache_key)
+            if cached is None:
+                _ = self._load_portfolio_from_cache(cache_key)
+                cached = self._portfolio_exposure_cache.get(cache_key)
+            if cached is not None:
+                cached_frame = cached[0] if series_name == "netpos" else cached[1]
                 if not cached_frame.is_empty():
                     value_col = "net_position" if series_name == "netpos" else "margin_used"
                     cached_frame = filter_points(cached_frame, "timestamp")

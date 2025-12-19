@@ -17,8 +17,6 @@ class SeriesBundle:
     equity: pl.DataFrame
     daily_returns: pl.DataFrame
     daily_percent: pl.DataFrame
-    net_position: pl.DataFrame
-    margin: pl.DataFrame
     spikes: pl.DataFrame
 
 
@@ -160,27 +158,6 @@ class PerFileCache:
             file_id=file_id,
         )
 
-    def net_position(
-        self,
-        path: Path,
-        contract_multiplier: float | None = None,
-        margin_override: float | None = None,
-        direction: str | None = None,
-        loaded: LoadedTrades | None = None,
-        file_id: str | None = None,
-    ) -> pl.DataFrame:
-        """Return point-in-time net position series; cache intervals when no overrides applied."""
-
-        intervals = self._netpos_interval_artifact(
-            path,
-            contract_multiplier=contract_multiplier,
-            margin_override=margin_override,
-            direction=direction,
-            loaded=loaded,
-            file_id=file_id,
-        )
-        return intervals.select(pl.col("start").alias("timestamp"), pl.col("net_position"))
-
     def net_position_intervals(
         self,
         path: Path,
@@ -200,27 +177,6 @@ class PerFileCache:
             loaded=loaded,
             file_id=file_id,
         )
-
-    def margin_usage(
-        self,
-        path: Path,
-        contract_multiplier: float | None = None,
-        margin_override: float | None = None,
-        direction: str | None = None,
-        loaded: LoadedTrades | None = None,
-        file_id: str | None = None,
-    ) -> pl.DataFrame:
-        """Return margin usage intervals (timestamp=interval start) with caching when no overrides."""
-
-        intervals = self._netpos_interval_artifact(
-            path,
-            contract_multiplier=contract_multiplier,
-            margin_override=margin_override,
-            direction=direction,
-            loaded=loaded,
-            file_id=file_id,
-        )
-        return intervals.select(pl.col("start").alias("timestamp"), pl.col("margin_used"), pl.col("symbol"))
 
     def spike_overlay(
         self,
@@ -249,8 +205,6 @@ class PerFileCache:
             equity=equity,
             daily_returns=daily_returns,
             daily_percent=daily_percent,
-            net_position=self.net_position(path, loaded=loaded, file_id=file_id),
-            margin=self.margin_usage(path, loaded=loaded, file_id=file_id),
             spikes=self.spike_overlay(path, loaded=loaded, file_id=file_id),
         )
 
@@ -500,30 +454,6 @@ class PerFileCache:
             )
         return pl.DataFrame(rows)
 
-    def _compute_net_positions(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
-        return self._netpos_intervals(
-            loaded,
-            contract_multiplier=contract_multiplier,
-            margin_override=margin_override,
-            end_override=None,
-            trades_override=None,
-            direction=direction,
-        )[0]
-
-    def _compute_margin(self, loaded: LoadedTrades, contract_multiplier: float | None = None, margin_override: float | None = None, direction: str | None = None) -> pl.DataFrame:
-        _, intervals = self._netpos_intervals(
-            loaded,
-            contract_multiplier=contract_multiplier,
-            margin_override=margin_override,
-            end_override=None,
-            trades_override=None,
-            direction=direction,
-        )
-        return intervals.select(
-            pl.col("start").alias("timestamp"),
-            pl.col("margin_used"),
-            pl.col("symbol"),
-        )
 
     def _compute_spikes(self, loaded: LoadedTrades, contract_multiplier: float | None = None, direction: str | None = None) -> pl.DataFrame:
         cmult = contract_multiplier if contract_multiplier is not None else self.default_contract_multiplier
