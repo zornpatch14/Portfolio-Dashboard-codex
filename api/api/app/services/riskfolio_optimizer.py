@@ -51,7 +51,7 @@ class MeanRiskOptimizer:
         rm_code = self._risk_measure(settings.risk_measure)
         obj_code = self._objective(settings.objective)
         kelly_mode = self._kelly_mode(settings.return_model)
-        risk_free = settings.risk_free_rate
+        risk_free = self._annual_to_daily_rate(settings.risk_free_rate)
 
         portfolio = rp.Portfolio(returns=returns)
         portfolio.alpha = settings.alpha
@@ -354,6 +354,11 @@ class MeanRiskOptimizer:
             )
         return data
 
+    @staticmethod
+    def _annual_to_daily_rate(annual_rate: float) -> float:
+        """Convert an annualized simple rate into a calendar-day daily rate."""
+        return float(annual_rate) / 365.0
+
     def _backtested_equity_series(
         self,
         returns: pd.DataFrame,
@@ -382,8 +387,8 @@ class MeanRiskOptimizer:
     ) -> BacktestSeries:
         aligned = returns.reindex(columns=weights.index).fillna(0.0)
         port_returns = aligned.to_numpy() @ weights.to_numpy().reshape((-1, 1))
-        compounded = np.cumprod(1.0 + port_returns.flatten())
-        values = capital * compounded
+        cumulative = np.cumsum(port_returns.flatten())
+        values = capital * (1.0 + cumulative)
         points = [
             SeriesPoint(timestamp=pd.Timestamp(idx).to_pydatetime(), value=float(val))
             for idx, val in zip(aligned.index, values)

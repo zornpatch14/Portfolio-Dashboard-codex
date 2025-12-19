@@ -2504,7 +2504,12 @@ export default function HomePage() {
             </div>
 
             <div className="card">
-              <label className="field-label" htmlFor="rf">Risk-Free Rate (annual %)</label>
+              <label className="field-label" htmlFor="rf">
+                Risk-Free Rate (annual %)
+                <span className="text-muted small" style={{ marginLeft: 6 }}>
+                  (Converted to daily % before Riskfolio uses it)
+                </span>
+              </label>
               <input
                 id="rf"
                 className="input"
