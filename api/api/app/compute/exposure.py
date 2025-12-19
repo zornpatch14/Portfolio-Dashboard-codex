@@ -307,20 +307,76 @@ def build_symbol_stepwise(
 def build_portfolio_positions(
     symbol_positions: pl.DataFrame,
     *,
+    symbol_col: str = "symbol",
     timestamp_col: str = "timestamp",
     value_col: str = "net_position",
 ) -> pl.DataFrame:
-    """Aggregate symbol positions into portfolio exposure (sum of abs)."""
+    """Aggregate grouped positions into portfolio exposure over a common timeline.
+
+    Notes:
+    - `symbol_positions` is expected to contain step positions per symbol (one row per symbol change timestamp).
+    - Portfolio exposure must be computed on the union of all change timestamps across symbols; simply grouping by
+      timestamp and summing present rows is incorrect because other symbols retain their prior value at that time.
+    """
 
     if symbol_positions.is_empty():
         return pl.DataFrame({timestamp_col: [], value_col: []})
 
-    return (
-        symbol_positions.with_columns(pl.col(value_col).abs().alias("_abs"))
-        .group_by(timestamp_col)
-        .agg(pl.col("_abs").sum().alias(value_col))
-        .sort(timestamp_col)
-    )
+    if symbol_col not in symbol_positions.columns:
+        raise ValueError(f"symbol_positions must contain '{symbol_col}' column")
+
+    groups = symbol_positions.partition_by(symbol_col, as_dict=True)
+    if not groups:
+        return pl.DataFrame({timestamp_col: [], value_col: []})
+
+    # Ensure deterministic symbol keys (Polars returns tuple keys for group-by / partition-by).
+    def norm_key(key: object) -> object:
+        if isinstance(key, tuple) and len(key) == 1:
+            return key[0]
+        return key
+
+    # Build per-symbol event streams: (timestamp, value). Assume one row per timestamp per symbol.
+    streams: dict[object, list[tuple[datetime, float]]] = {}
+    for raw_sym, frame in groups.items():
+        sym = norm_key(raw_sym)
+        ordered = frame.select(timestamp_col, value_col).sort(timestamp_col)
+        streams[sym] = [
+            (row[0], float(row[1] or 0.0)) for row in ordered.iter_rows()
+        ]
+
+    # Merge all symbol event streams by timestamp, maintaining a running sum(abs(value)).
+    import heapq
+
+    current: dict[object, float] = {sym: 0.0 for sym in streams}
+    running = 0.0
+
+    heap: list[tuple[datetime, object, int]] = []
+    for sym, events in streams.items():
+        if events:
+            ts0, _ = events[0]
+            heapq.heappush(heap, (ts0, sym, 0))
+
+    out_ts: list[datetime] = []
+    out_vals: list[float] = []
+
+    while heap:
+        ts, _, _ = heap[0]
+        # Apply all symbol updates at this timestamp.
+        while heap and heap[0][0] == ts:
+            _, sym, idx = heapq.heappop(heap)
+            events = streams[sym]
+            _, new_val = events[idx]
+            old_val = current[sym]
+            running += abs(new_val) - abs(old_val)
+            current[sym] = new_val
+            next_idx = idx + 1
+            if next_idx < len(events):
+                next_ts, _ = events[next_idx]
+                heapq.heappush(heap, (next_ts, sym, next_idx))
+        out_ts.append(ts)
+        out_vals.append(running)
+
+    return pl.DataFrame({timestamp_col: out_ts, value_col: out_vals}).sort(timestamp_col)
 
 
 def build_portfolio_stepwise(
