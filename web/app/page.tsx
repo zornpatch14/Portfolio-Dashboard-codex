@@ -1448,7 +1448,7 @@ export default function HomePage() {
     queryFn: () =>
       fetchSeries(selectionForFetch, 'margin', { downsample: includeDownsample, exposureView: 'portfolio_step' }),
     staleTime: STALE_TIME,
-    enabled: canQueryData && showExposureDebug,
+    enabled: canQueryData,
   });
 
   const histogramQuery = useQuery({
@@ -1762,7 +1762,7 @@ export default function HomePage() {
     const equityPts = equityLines.portfolio;
     if (!equityPts.length) return [];
     const sortedEquity = [...equityPts].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
-    const marginAt = buildStepper(marginLines.portfolio, 0);
+    const marginAt = buildStepper(marginPortfolioStepLines.portfolio, 0);
 
     const aValues = sortedEquity.map((p) => ({
       timestamp: p.timestamp,
@@ -1781,7 +1781,7 @@ export default function HomePage() {
       timestamp: row.timestamp,
       value: suffixMin[idx] - row.equity,
     }));
-  }, [equityLines.portfolio, marginLines.portfolio, accountEquity, buildStepper]);
+  }, [equityLines.portfolio, marginPortfolioStepLines.portfolio, accountEquity, buildStepper]);
 
 
 
@@ -1941,8 +1941,7 @@ export default function HomePage() {
       netposPerSymbolQuery.isFetching ||
       netposPortfolioStepQuery.isFetching ||
       marginPerFileQuery.isFetching ||
-      marginPerSymbolQuery.isFetching ||
-      marginPortfolioStepQuery.isFetching);
+      marginPerSymbolQuery.isFetching);
 
   const busy =
 
@@ -1962,6 +1961,7 @@ export default function HomePage() {
 
     histogramQuery.isFetching ||
 
+    marginPortfolioStepQuery.isFetching ||
     exposureDebugFetching;
 
 
@@ -4415,6 +4415,7 @@ export default function HomePage() {
               netposQuery.refetch();
 
               marginQuery.refetch();
+              marginPortfolioStepQuery.refetch();
 
               histogramQuery.refetch();
 
@@ -4427,7 +4428,6 @@ export default function HomePage() {
                 netposPortfolioStepQuery.refetch();
                 marginPerFileQuery.refetch();
                 marginPerSymbolQuery.refetch();
-                marginPortfolioStepQuery.refetch();
               }
 
 
