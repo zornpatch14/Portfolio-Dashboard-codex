@@ -1660,6 +1660,25 @@ export default function HomePage() {
     return { perFile, portfolio: portfolioPoints };
   }, []);
 
+  const buildStepper = useCallback((points: { timestamp: string; value: number }[], fallback: number) => {
+    if (!points.length) {
+      return () => fallback;
+    }
+    const sorted = [...points].sort((a, b) => {
+      if (a.timestamp === b.timestamp) return 0;
+      return a.timestamp < b.timestamp ? -1 : 1;
+    });
+    let idx = 0;
+    let last = fallback;
+    return (ts: string) => {
+      while (idx < sorted.length && sorted[idx].timestamp <= ts) {
+        last = sorted[idx].value;
+        idx += 1;
+      }
+      return last;
+    };
+  }, []);
+
   const marginLines = useMemo(() => buildSeriesLines(marginQuery.data), [marginQuery.data, buildSeriesLines]);
 
 
@@ -1696,83 +1715,25 @@ export default function HomePage() {
   const purchasingPowerLines = useMemo(() => {
 
     const buildTimeline = (left: { timestamp: string }[], right: { timestamp: string }[]) =>
-
       Array.from(
-
         new Set([
-
           ...left.map((p) => p.timestamp),
-
           ...right.map((p) => p.timestamp),
-
         ]),
-
       ).sort();
 
-
-
-    const buildStepper = (points: { timestamp: string; value: number }[], fallback: number) => {
-
-      if (!points.length) {
-
-        return () => fallback;
-
-      }
-
-      const sorted = [...points].sort((a, b) => {
-
-        if (a.timestamp === b.timestamp) return 0;
-
-        return a.timestamp < b.timestamp ? -1 : 1;
-
-      });
-
-      let idx = 0;
-
-      let last = fallback;
-
-      return (ts: string) => {
-
-        while (idx < sorted.length && sorted[idx].timestamp <= ts) {
-
-          last = sorted[idx].value;
-
-          idx += 1;
-
-        }
-
-        return last;
-
-      };
-
-    };
-
-
-
     const buildSeries = (
-
       equityPts: { timestamp: string; value: number }[],
-
       marginPts: { timestamp: string; value: number }[],
-
     ) => {
-
       const timeline = buildTimeline(equityPts, marginPts);
-
       const equityAt = buildStepper(equityPts, accountEquity);
-
       const marginAt = buildStepper(marginPts, 0);
-
       return timeline.map((ts) => {
-
         const equityVal = equityAt(ts);
-
         const marginVal = marginAt(ts);
-
         return { timestamp: ts, value: equityVal - marginVal };
-
       });
-
     };
 
 
@@ -1795,7 +1756,32 @@ export default function HomePage() {
 
     return { perFile, portfolio: portfolioPoints };
 
-  }, [equityLines, marginLines, accountEquity]);
+  }, [equityLines, marginLines, accountEquity, buildStepper]);
+
+  const startDateSafetyLine = useMemo(() => {
+    const equityPts = equityLines.portfolio;
+    if (!equityPts.length) return [];
+    const sortedEquity = [...equityPts].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+    const marginAt = buildStepper(marginLines.portfolio, 0);
+
+    const aValues = sortedEquity.map((p) => ({
+      timestamp: p.timestamp,
+      equity: p.value,
+      a: accountEquity + p.value - marginAt(p.timestamp),
+    }));
+
+    const suffixMin: number[] = new Array(aValues.length);
+    let minSoFar = Number.POSITIVE_INFINITY;
+    for (let i = aValues.length - 1; i >= 0; i -= 1) {
+      minSoFar = Math.min(minSoFar, aValues[i].a);
+      suffixMin[i] = minSoFar;
+    }
+
+    return aValues.map((row, idx) => ({
+      timestamp: row.timestamp,
+      value: suffixMin[idx] - row.equity,
+    }));
+  }, [equityLines.portfolio, marginLines.portfolio, accountEquity, buildStepper]);
 
 
 
@@ -3400,6 +3386,15 @@ export default function HomePage() {
 
           ]}
 
+        />
+        <EquityMultiChart
+          title="Start-Date Safety ($)"
+          description="Worst future purchasing power if you started on that date"
+          series={
+            plotMarginEnabled['Portfolio'] === false
+              ? []
+              : [{ name: 'Portfolio', points: startDateSafetyLine }]
+          }
         />
 
         {showExposureDebug ? (
