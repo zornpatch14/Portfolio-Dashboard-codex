@@ -316,6 +316,12 @@ export type SeriesKind =
 
   | 'margin';
 
+export type ExposureView =
+  | 'portfolio_daily'
+  | 'portfolio_step'
+  | 'per_symbol'
+  | 'per_file';
+
 
 
 const endpoint: Record<SeriesKind | 'metrics' | 'histogram', string> = {
@@ -378,7 +384,7 @@ function raiseResponseError(response: Response): never {
 
 
 
-function selectionQuery(selection: Selection, opts?: { downsample?: boolean }) {
+function selectionQuery(selection: Selection, opts?: { downsample?: boolean; exposureView?: ExposureView }) {
   const params = new URLSearchParams();
   selection.files.forEach((file) => params.append('files', file));
   selection.symbols.forEach((symbol) => params.append('symbols', symbol));
@@ -406,15 +412,21 @@ function selectionQuery(selection: Selection, opts?: { downsample?: boolean }) {
   if (opts && opts.downsample !== undefined) {
     params.set('downsample', String(opts.downsample));
   }
+  if (opts?.exposureView) {
+    params.set('exposure_view', opts.exposureView);
+  }
   return params.toString();
 
 }
 
 
 
-export async function fetchSeries(selection: Selection, kind: SeriesKind, downsample: boolean = true) {
-
-  const query = selectionQuery(selection, { downsample });
+export async function fetchSeries(
+  selection: Selection,
+  kind: SeriesKind,
+  opts?: { downsample?: boolean; exposureView?: ExposureView },
+) {
+  const query = selectionQuery(selection, { downsample: opts?.downsample ?? true, exposureView: opts?.exposureView });
 
   const path = `${endpoint[kind]}?${query}`;
 
