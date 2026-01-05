@@ -126,6 +126,7 @@ class MeanRiskOptimizer:
             "msv": "MSV",
             "semi_variance": "MSV",
             "mad": "MAD",
+            "gmd": "GMD",
             "cvar": "CVaR",
         }
         return mapping.get(label.lower(), "MV")
@@ -147,6 +148,7 @@ class MeanRiskOptimizer:
             "MV": "upperdev",
             "MSV": "uppersdev",
             "MAD": "uppermad",
+            "GMD": "uppergmd",
             "CVaR": "upperCVaR",
         }
         return mapping.get(rm_code)
@@ -292,6 +294,8 @@ class MeanRiskOptimizer:
             return float(rk.SemiDeviation(series))
         if rm_code == "MAD":
             return float(rk.MAD(series))
+        if rm_code == "GMD":
+            return float(rk.GMD(series))
         if rm_code == "CVaR":
             return float(rk.CVaR_Hist(series, alpha))
         return float(np.sqrt(weights.T @ cov @ weights))
