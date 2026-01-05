@@ -2480,14 +2480,18 @@ export default function HomePage() {
               </select>
               <label className="field-label" htmlFor="risk-measure" style={{ marginTop: 12 }}>Risk Measure</label>
               <select id="risk-measure" className="input" value={meanRiskRiskMeasure} onChange={(event) => setMeanRiskRiskMeasure(event.target.value)}>
-                <option value="MV">Variance / Standard Deviation</option>
-                <option value="MSV">Semi-Variance</option>
-                <option value="MAD">Mean Absolute Deviation (MAD)</option>
-                <option value="GMD">Gini Mean Difference (GMD)</option>
-                <option value="FLPM">First Lower Partial Moment (Omega)</option>
-                <option value="SLPM">Second Lower Partial Moment (Sortino)</option>
-                <option value="TG">Tail Gini</option>
-                <option value="CVaR">CVaR</option>
+                <optgroup label="Dispersion">
+                  <option value="MV">Variance / Standard Deviation</option>
+                  <option value="MAD">Mean Absolute Deviation (MAD)</option>
+                  <option value="GMD">Gini Mean Difference (GMD)</option>
+                </optgroup>
+                <optgroup label="Downside">
+                  <option value="MSV">Semi-Variance</option>
+                  <option value="FLPM">First Lower Partial Moment (Omega)</option>
+                  <option value="SLPM">Second Lower Partial Moment (Sortino)</option>
+                  <option value="TG">Tail Gini</option>
+                  <option value="CVaR">CVaR</option>
+                </optgroup>
               </select>
               <label className="field-label" htmlFor="cov-method" style={{ marginTop: 12 }}>Covariance Method</label>
               <select id="cov-method" className="input" value={meanRiskCovariance} onChange={(event) => setMeanRiskCovariance(event.target.value)}>
