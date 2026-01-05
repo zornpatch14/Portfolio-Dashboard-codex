@@ -50,7 +50,7 @@ class MeanRiskOptimizer:
 
         rm_code = self._risk_measure(settings.risk_measure)
         obj_code = self._objective(settings.objective)
-        kelly_mode = None
+        kelly_mode = self._kelly_mode(settings.return_model)
         risk_free = self._annual_to_daily_rate(settings.risk_free_rate)
 
         portfolio = rp.Portfolio(returns=returns)
@@ -74,7 +74,7 @@ class MeanRiskOptimizer:
             portfolio.ainequality = A
             portfolio.binequality = b
 
-        portfolio.assets_stats(method_mu="hist", method_cov="ledoit")
+        portfolio.assets_stats(method_mu=settings.method_mu, method_cov=settings.method_cov)
 
         try:
             weights_df = portfolio.optimization(
@@ -146,6 +146,12 @@ class MeanRiskOptimizer:
             "sharpe": "Sharpe",
         }
         return mapping.get(label.lower(), "Sharpe")
+
+    def _kelly_mode(self, label: str) -> str | None:
+        mapping = {
+            "arithmetic": None,
+        }
+        return mapping.get(label.lower(), None)
 
     def _risk_limit_attribute(self, rm_code: str) -> str | None:
         mapping = {
