@@ -2495,9 +2495,6 @@ export default function HomePage() {
                 onChange={(event) => setMeanRiskReturnEstimate(event.target.value)}
               >
                 <option value="hist">Sample Mean (Historical)</option>
-                <option value="ewma1">EWMA (lambda=0.94)</option>
-                <option value="ewma2">EWMA (lambda=0.97)</option>
-                <option value="ewma3">EWMA (lambda=0.99)</option>
               </select>
               <label className="field-label" htmlFor="bounds" style={{ marginTop: 12 }}>Weight Bounds (min / max)</label>
               <div className="flex gap-sm">
