@@ -127,6 +127,7 @@ class MeanRiskOptimizer:
             "semi_variance": "MSV",
             "mad": "MAD",
             "gmd": "GMD",
+            "flpm": "FLPM",
             "cvar": "CVaR",
         }
         return mapping.get(label.lower(), "MV")
@@ -149,6 +150,7 @@ class MeanRiskOptimizer:
             "MSV": "uppersdev",
             "MAD": "uppermad",
             "GMD": "uppergmd",
+            "FLPM": "upperflpm",
             "CVaR": "upperCVaR",
         }
         return mapping.get(rm_code)
@@ -267,7 +269,7 @@ class MeanRiskOptimizer:
         scenarios = returns.to_numpy()
         series = scenarios @ w_vec
         expected = float(mu.T @ w_vec)
-        risk_val = self._risk_value(rm_code, series, w_vec, cov, settings.alpha)
+        risk_val = self._risk_value(rm_code, series, w_vec, cov, settings.alpha, risk_free)
         sharpe = (expected - risk_free) / risk_val if risk_val != 0 else 0.0
         max_dd = float(rk.MDD_Abs(series))
         return OptimizerSummary(
@@ -287,6 +289,7 @@ class MeanRiskOptimizer:
         weights: np.ndarray,
         cov: np.ndarray,
         alpha: float,
+        risk_free: float,
     ) -> float:
         if rm_code == "MV":
             return float(np.sqrt(weights.T @ cov @ weights))
@@ -296,6 +299,8 @@ class MeanRiskOptimizer:
             return float(rk.MAD(series))
         if rm_code == "GMD":
             return float(rk.GMD(series))
+        if rm_code == "FLPM":
+            return float(rk.LPM(series, MAR=risk_free, p=1))
         if rm_code == "CVaR":
             return float(rk.CVaR_Hist(series, alpha))
         return float(np.sqrt(weights.T @ cov @ weights))
@@ -333,7 +338,7 @@ class MeanRiskOptimizer:
             w = frontier[column].astype(float).to_numpy().reshape((-1, 1))
             series = scenarios @ w
             expected = float(mu.T @ w)
-            risk_val = self._risk_value(rm_code, series, w, cov, settings.alpha)
+            risk_val = self._risk_value(rm_code, series, w, cov, settings.alpha, risk_free)
             weights_dict = {asset: float(frontier.loc[asset, column]) for asset in frontier.index}
             data.append(
                 FrontierPoint(
