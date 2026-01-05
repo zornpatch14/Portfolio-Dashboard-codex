@@ -55,6 +55,7 @@ class MeanRiskOptimizer:
 
         portfolio = rp.Portfolio(returns=returns)
         portfolio.alpha = settings.alpha
+        portfolio.a_sim = settings.a_sim
         portfolio.lowerlng = settings.bounds.default_min
         portfolio.upperlng = settings.bounds.default_max
         portfolio.budget = settings.budget
