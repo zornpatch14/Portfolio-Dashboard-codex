@@ -21,12 +21,12 @@ class ContractSpec:
 
 # Default margin/point specs; extend as needed.
 MARGIN_SPEC: Dict[str, ContractSpec] = {
-    "MNQ": ContractSpec(3250.0, 3250.0, 2.0),
+    "MNQ": ContractSpec(4000.0, 4000.0, 2.0),
     "MES": ContractSpec(2300.0, 2300.0, 5.0),
     "MYM": ContractSpec(1500.0, 1500.0, 1.0),
-    "M2K": ContractSpec(1000.0, 1000.0, 5.0),
+    "M2K": ContractSpec(1200.0, 1200.0, 5.0),
     "CD": ContractSpec(1100.0, 1100.0, 100000.0),
-    "JY": ContractSpec(3100.0, 3100.0, 125000.0),
+    "JY": ContractSpec(3200.0, 3200.0, 125000.0),
     "NE1": ContractSpec(1500.0, 1500.0, 100000.0),
     "NG": ContractSpec(3800.0, 3800.0, 10000.0),
     "SF": ContractSpec(4500.0, 4500.0, 125000.0),
