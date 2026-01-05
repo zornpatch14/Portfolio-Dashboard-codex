@@ -60,14 +60,15 @@ class MeanRiskOptimizer:
         portfolio.upperlng = settings.bounds.default_max
         portfolio.budget = settings.budget
         if settings.min_return is not None:
-            portfolio.lowerret = settings.min_return
+            portfolio.lowerret = self._annual_to_daily_rate(settings.min_return)
         if settings.turnover_limit is not None:
             portfolio.allowTO = True
             portfolio.turnover = settings.turnover_limit
         if settings.max_risk is not None:
             limit_attr = self._risk_limit_attribute(rm_code)
             if limit_attr:
-                setattr(portfolio, limit_attr, settings.max_risk)
+                max_risk_daily = self._annual_to_daily_rate(settings.max_risk)
+                setattr(portfolio, limit_attr, max_risk_daily)
 
         A, b = self._linear_constraints(metas, returns.columns.tolist(), settings)
         if A is not None and b is not None:

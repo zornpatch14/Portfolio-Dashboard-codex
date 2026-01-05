@@ -1289,6 +1289,8 @@ export default function HomePage() {
         },
         {} as Record<string, [number | null, number | null]>,
       );
+      const maxRiskValue = parseOptionalNumber(meanRiskMaxRisk);
+      const minReturnValue = parseOptionalNumber(meanRiskMinReturn);
       const payload: MeanRiskPayload = {
         objective: meanRiskObjective,
         risk_measure: meanRiskRiskMeasure,
@@ -1309,8 +1311,8 @@ export default function HomePage() {
         symbol_caps: parseCapsInput(meanRiskSymbolCaps),
         strategy_caps: parseCapsInput(meanRiskStrategyCaps),
         efficient_frontier_points: meanRiskFrontierPoints,
-        max_risk: parseOptionalNumber(meanRiskMaxRisk),
-        min_return: parseOptionalNumber(meanRiskMinReturn),
+        max_risk: maxRiskValue === null ? null : maxRiskValue / 100,
+        min_return: minReturnValue === null ? null : minReturnValue / 100,
         turnover_limit: parseOptionalNumber(meanRiskTurnover),
       };
       const response = await submitRiskfolioJob(selectionForFetch, payload);
@@ -2633,22 +2635,31 @@ export default function HomePage() {
               <div className="text-muted small" style={{ marginTop: 4 }}>
                 {usesASim ? 'Used by the Tail Gini risk measure.' : 'Not used unless Tail Gini is selected.'}
               </div>
-              <label className="field-label" htmlFor="max-risk" style={{ marginTop: 12 }}>Max Risk (selected measure, decimal)</label>
+              <label className="field-label" htmlFor="max-risk" style={{ marginTop: 12 }}>Max Risk (annual % of selected measure)</label>
               <input
                 id="max-risk"
                 className="input"
                 type="number"
+                min={0}
+                step={0.05}
                 value={meanRiskMaxRisk}
                 onChange={(event) => setMeanRiskMaxRisk(event.target.value)}
               />
-              <label className="field-label" htmlFor="min-return" style={{ marginTop: 12 }}>Minimum Return (decimal)</label>
+              <div className="text-muted small" style={{ marginTop: 4 }}>
+                Enter an annual percentage (e.g., 10 for 10%). Converted to daily before optimization.
+              </div>
+              <label className="field-label" htmlFor="min-return" style={{ marginTop: 12 }}>Minimum Return (annual %)</label>
               <input
                 id="min-return"
                 className="input"
                 type="number"
+                step={0.05}
                 value={meanRiskMinReturn}
                 onChange={(event) => setMeanRiskMinReturn(event.target.value)}
               />
+              <div className="text-muted small" style={{ marginTop: 4 }}>
+                Enter an annual percentage (e.g., 5 for 5%). Converted to daily before optimization.
+              </div>
               <label className="field-label" htmlFor="turnover" style={{ marginTop: 12 }}>Turnover Limit (decimal)</label>
               <input
                 id="turnover"
