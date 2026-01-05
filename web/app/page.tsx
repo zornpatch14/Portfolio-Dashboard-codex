@@ -25,7 +25,7 @@ import {
   uploadFiles,
   getSelectionMeta,
   listFiles,
-  SeriesKind,
+  SeriesResponse,
   JobStatusResponse,
   MeanRiskPayload,
   coerceNumber,
@@ -338,6 +338,7 @@ export default function HomePage() {
   const [plotDrawdownEnabled, setPlotDrawdownEnabled] = useState<Record<string, boolean>>({});
 
   const [plotMarginEnabled, setPlotMarginEnabled] = useState<Record<string, boolean>>({});
+  const [showExposureDebug, setShowExposureDebug] = useState(false);
 
   const [plotHistogramEnabled, setPlotHistogramEnabled] = useState<Record<string, boolean>>({});
 
@@ -1334,7 +1335,7 @@ export default function HomePage() {
 
     queryKey: ['equity', selectionKey, includeDownsample],
 
-    queryFn: () => fetchSeries(selectionForFetch, 'equity', includeDownsample),
+    queryFn: () => fetchSeries(selectionForFetch, 'equity', { downsample: includeDownsample }),
 
     staleTime: STALE_TIME,
 
@@ -1346,7 +1347,7 @@ export default function HomePage() {
 
     queryKey: ['equityPercent', selectionKey, includeDownsample],
 
-    queryFn: () => fetchSeries(selectionForFetch, 'equityPercent', includeDownsample),
+    queryFn: () => fetchSeries(selectionForFetch, 'equityPercent', { downsample: includeDownsample }),
 
     staleTime: STALE_TIME,
 
@@ -1358,7 +1359,7 @@ export default function HomePage() {
 
     queryKey: ['drawdown', selectionKey, includeDownsample],
 
-    queryFn: () => fetchSeries(selectionForFetch, 'drawdown', includeDownsample),
+    queryFn: () => fetchSeries(selectionForFetch, 'drawdown', { downsample: includeDownsample }),
 
     staleTime: STALE_TIME,
 
@@ -1370,7 +1371,7 @@ export default function HomePage() {
 
     queryKey: ['intradayDrawdown', selectionKey, includeDownsample],
 
-    queryFn: () => fetchSeries(selectionForFetch, 'intradayDrawdown', includeDownsample),
+    queryFn: () => fetchSeries(selectionForFetch, 'intradayDrawdown', { downsample: includeDownsample }),
 
     staleTime: STALE_TIME,
 
@@ -1382,7 +1383,7 @@ export default function HomePage() {
 
     queryKey: ['netpos', selectionKey, includeDownsample],
 
-    queryFn: () => fetchSeries(selectionForFetch, 'netpos', includeDownsample),
+    queryFn: () => fetchSeries(selectionForFetch, 'netpos', { downsample: includeDownsample }),
 
     staleTime: STALE_TIME,
 
@@ -1394,12 +1395,60 @@ export default function HomePage() {
 
     queryKey: ['margin', selectionKey, includeDownsample],
 
-    queryFn: () => fetchSeries(selectionForFetch, 'margin', includeDownsample),
+    queryFn: () => fetchSeries(selectionForFetch, 'margin', { downsample: includeDownsample }),
 
     staleTime: STALE_TIME,
 
     enabled: canQueryData,
 
+  });
+
+  const netposPerFileQuery = useQuery({
+    queryKey: ['netpos', selectionKey, includeDownsample, 'per_file'],
+    queryFn: () =>
+      fetchSeries(selectionForFetch, 'netpos', { downsample: includeDownsample, exposureView: 'per_file' }),
+    staleTime: STALE_TIME,
+    enabled: canQueryData && showExposureDebug,
+  });
+
+  const netposPerSymbolQuery = useQuery({
+    queryKey: ['netpos', selectionKey, includeDownsample, 'per_symbol'],
+    queryFn: () =>
+      fetchSeries(selectionForFetch, 'netpos', { downsample: includeDownsample, exposureView: 'per_symbol' }),
+    staleTime: STALE_TIME,
+    enabled: canQueryData && showExposureDebug,
+  });
+
+  const netposPortfolioStepQuery = useQuery({
+    queryKey: ['netpos', selectionKey, includeDownsample, 'portfolio_step'],
+    queryFn: () =>
+      fetchSeries(selectionForFetch, 'netpos', { downsample: includeDownsample, exposureView: 'portfolio_step' }),
+    staleTime: STALE_TIME,
+    enabled: canQueryData && showExposureDebug,
+  });
+
+  const marginPerFileQuery = useQuery({
+    queryKey: ['margin', selectionKey, includeDownsample, 'per_file'],
+    queryFn: () =>
+      fetchSeries(selectionForFetch, 'margin', { downsample: includeDownsample, exposureView: 'per_file' }),
+    staleTime: STALE_TIME,
+    enabled: canQueryData && showExposureDebug,
+  });
+
+  const marginPerSymbolQuery = useQuery({
+    queryKey: ['margin', selectionKey, includeDownsample, 'per_symbol'],
+    queryFn: () =>
+      fetchSeries(selectionForFetch, 'margin', { downsample: includeDownsample, exposureView: 'per_symbol' }),
+    staleTime: STALE_TIME,
+    enabled: canQueryData && showExposureDebug,
+  });
+
+  const marginPortfolioStepQuery = useQuery({
+    queryKey: ['margin', selectionKey, includeDownsample, 'portfolio_step'],
+    queryFn: () =>
+      fetchSeries(selectionForFetch, 'margin', { downsample: includeDownsample, exposureView: 'portfolio_step' }),
+    staleTime: STALE_TIME,
+    enabled: canQueryData,
   });
 
   const histogramQuery = useQuery({
@@ -1602,122 +1651,89 @@ export default function HomePage() {
 
 
 
-  const marginLines = useMemo(() => {
-
-    const portfolioPoints = (marginQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-
-    const perFile = (marginQuery.data?.perFile ?? []).map((line) => ({
-
+  const buildSeriesLines = useCallback((series?: SeriesResponse) => {
+    const portfolioPoints = (series?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
+    const perFile = (series?.perFile ?? []).map((line) => ({
       name: line.label || line.contributor_id,
-
       points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
-
     }));
-
     return { perFile, portfolio: portfolioPoints };
+  }, []);
 
-  }, [marginQuery.data]);
+  const buildStepper = useCallback((points: { timestamp: string; value: number }[], fallback: number) => {
+    if (!points.length) {
+      return () => fallback;
+    }
+    const sorted = [...points].sort((a, b) => {
+      if (a.timestamp === b.timestamp) return 0;
+      return a.timestamp < b.timestamp ? -1 : 1;
+    });
+    let idx = 0;
+    let last = fallback;
+    return (ts: string) => {
+      while (idx < sorted.length && sorted[idx].timestamp <= ts) {
+        last = sorted[idx].value;
+        idx += 1;
+      }
+      return last;
+    };
+  }, []);
+
+  const marginLines = useMemo(() => buildSeriesLines(marginQuery.data), [marginQuery.data, buildSeriesLines]);
 
 
 
-  const netposLines = useMemo(() => {
+  const netposLines = useMemo(() => buildSeriesLines(netposQuery.data), [netposQuery.data, buildSeriesLines]);
 
-    const portfolioPoints = (netposQuery.data?.portfolio ?? []).map((p) => ({ timestamp: p.timestamp, value: p.value }));
-
-    const perFile = (netposQuery.data?.perFile ?? []).map((line) => ({
-
-      name: line.label || line.contributor_id,
-
-      points: line.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
-
-    }));
-
-    return { perFile, portfolio: portfolioPoints };
-
-  }, [netposQuery.data]);
+  const marginPerFileLines = useMemo(() => buildSeriesLines(marginPerFileQuery.data), [
+    marginPerFileQuery.data,
+    buildSeriesLines,
+  ]);
+  const marginPerSymbolLines = useMemo(() => buildSeriesLines(marginPerSymbolQuery.data), [
+    marginPerSymbolQuery.data,
+    buildSeriesLines,
+  ]);
+  const marginPortfolioStepLines = useMemo(() => buildSeriesLines(marginPortfolioStepQuery.data), [
+    marginPortfolioStepQuery.data,
+    buildSeriesLines,
+  ]);
+  const netposPerFileLines = useMemo(() => buildSeriesLines(netposPerFileQuery.data), [
+    netposPerFileQuery.data,
+    buildSeriesLines,
+  ]);
+  const netposPerSymbolLines = useMemo(() => buildSeriesLines(netposPerSymbolQuery.data), [
+    netposPerSymbolQuery.data,
+    buildSeriesLines,
+  ]);
+  const netposPortfolioStepLines = useMemo(() => buildSeriesLines(netposPortfolioStepQuery.data), [
+    netposPortfolioStepQuery.data,
+    buildSeriesLines,
+  ]);
 
 
 
   const purchasingPowerLines = useMemo(() => {
 
     const buildTimeline = (left: { timestamp: string }[], right: { timestamp: string }[]) =>
-
       Array.from(
-
         new Set([
-
           ...left.map((p) => p.timestamp),
-
           ...right.map((p) => p.timestamp),
-
         ]),
-
       ).sort();
 
-
-
-    const buildStepper = (points: { timestamp: string; value: number }[], fallback: number) => {
-
-      if (!points.length) {
-
-        return () => fallback;
-
-      }
-
-      const sorted = [...points].sort((a, b) => {
-
-        if (a.timestamp === b.timestamp) return 0;
-
-        return a.timestamp < b.timestamp ? -1 : 1;
-
-      });
-
-      let idx = 0;
-
-      let last = fallback;
-
-      return (ts: string) => {
-
-        while (idx < sorted.length && sorted[idx].timestamp <= ts) {
-
-          last = sorted[idx].value;
-
-          idx += 1;
-
-        }
-
-        return last;
-
-      };
-
-    };
-
-
-
     const buildSeries = (
-
       equityPts: { timestamp: string; value: number }[],
-
       marginPts: { timestamp: string; value: number }[],
-
     ) => {
-
       const timeline = buildTimeline(equityPts, marginPts);
-
       const equityAt = buildStepper(equityPts, accountEquity);
-
       const marginAt = buildStepper(marginPts, 0);
-
       return timeline.map((ts) => {
-
         const equityVal = equityAt(ts);
-
         const marginVal = marginAt(ts);
-
         return { timestamp: ts, value: equityVal - marginVal };
-
       });
-
     };
 
 
@@ -1740,7 +1756,32 @@ export default function HomePage() {
 
     return { perFile, portfolio: portfolioPoints };
 
-  }, [equityLines, marginLines, accountEquity]);
+  }, [equityLines, marginLines, accountEquity, buildStepper]);
+
+  const startDateSafetyLine = useMemo(() => {
+    const equityPts = equityLines.portfolio;
+    if (!equityPts.length) return [];
+    const sortedEquity = [...equityPts].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+    const marginAt = buildStepper(marginPortfolioStepLines.portfolio, 0);
+
+    const aValues = sortedEquity.map((p) => ({
+      timestamp: p.timestamp,
+      equity: p.value,
+      a: accountEquity + p.value - marginAt(p.timestamp),
+    }));
+
+    const suffixMin: number[] = new Array(aValues.length);
+    let minSoFar = Number.POSITIVE_INFINITY;
+    for (let i = aValues.length - 1; i >= 0; i -= 1) {
+      minSoFar = Math.min(minSoFar, aValues[i].a);
+      suffixMin[i] = minSoFar;
+    }
+
+    return aValues.map((row, idx) => ({
+      timestamp: row.timestamp,
+      value: suffixMin[idx] - row.equity,
+    }));
+  }, [equityLines.portfolio, marginPortfolioStepLines.portfolio, accountEquity, buildStepper]);
 
 
 
@@ -1894,6 +1935,14 @@ export default function HomePage() {
 
 
 
+  const exposureDebugFetching =
+    showExposureDebug &&
+    (netposPerFileQuery.isFetching ||
+      netposPerSymbolQuery.isFetching ||
+      netposPortfolioStepQuery.isFetching ||
+      marginPerFileQuery.isFetching ||
+      marginPerSymbolQuery.isFetching);
+
   const busy =
 
     equityQuery.isFetching ||
@@ -1910,7 +1959,10 @@ export default function HomePage() {
 
     marginQuery.isFetching ||
 
-    histogramQuery.isFetching;
+    histogramQuery.isFetching ||
+
+    marginPortfolioStepQuery.isFetching ||
+    exposureDebugFetching;
 
 
 
@@ -3238,6 +3290,24 @@ export default function HomePage() {
 
       </div>
 
+      <div className="card" style={{ marginTop: 12 }}>
+        <strong>Exposure views</strong>
+        <div className="flex gap-md" style={{ marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label className="field-label" htmlFor="exposure-debug" style={{ margin: 0 }}>
+            Show debug exposure views
+          </label>
+          <input
+            id="exposure-debug"
+            type="checkbox"
+            checked={showExposureDebug}
+            onChange={(event) => setShowExposureDebug(event.target.checked)}
+          />
+        </div>
+        <div className="text-muted small" style={{ marginTop: 8 }}>
+          Enables per-file, per-symbol, and portfolio-step exposure series alongside daily max.
+        </div>
+      </div>
+
 
 
       <div className="card" style={{ marginTop: 12 }}>
@@ -3317,38 +3387,99 @@ export default function HomePage() {
           ]}
 
         />
-
         <EquityMultiChart
-
-          title="Initial Margin Used ($)"
-
-          description="Initial Margin Used = |net_sym| x IM(sym)"
-
-          series={[
-
-            ...marginLines.perFile.filter((s) => plotMarginEnabled[s.name] !== false),
-
-            ...(plotMarginEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: marginLines.portfolio }]),
-
-          ]}
-
+          title="Start-Date Safety ($)"
+          description="Worst future purchasing power if you started on that date"
+          series={
+            plotMarginEnabled['Portfolio'] === false
+              ? []
+              : [{ name: 'Portfolio', points: startDateSafetyLine }]
+          }
         />
 
-        <EquityMultiChart
-
-          title="Net Contracts"
-
-          description="Net contracts over time (per file and portfolio)"
-
-          series={[
-
-            ...netposLines.perFile.filter((s) => plotMarginEnabled[s.name] !== false),
-
-            ...(plotMarginEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: netposLines.portfolio }]),
-
-          ]}
-
-        />
+        {showExposureDebug ? (
+          <>
+            <EquityMultiChart
+              title="Initial Margin Used (Per File, Stepwise)"
+              description="Initial Margin Used = |net_sym| x IM(sym)"
+              series={[
+                ...marginPerFileLines.perFile.filter((s) => plotMarginEnabled[s.name] !== false),
+                ...(plotMarginEnabled['Portfolio'] === false
+                  ? []
+                  : [{ name: 'Portfolio', points: marginPerFileLines.portfolio }]),
+              ]}
+            />
+            <EquityMultiChart
+              title="Initial Margin Used (Per Symbol, Stepwise)"
+              description="Initial Margin Used = |net_sym| x IM(sym)"
+              series={[
+                ...marginPerSymbolLines.perFile.filter((s) => plotMarginEnabled[s.name] !== false),
+                ...(plotMarginEnabled['Portfolio'] === false
+                  ? []
+                  : [{ name: 'Portfolio', points: marginPerSymbolLines.portfolio }]),
+              ]}
+            />
+            <EquityMultiChart
+              title="Initial Margin Used (Portfolio Stepwise)"
+              description="Initial Margin Used = |net_sym| x IM(sym)"
+              series={plotMarginEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: marginPortfolioStepLines.portfolio }]}
+            />
+            <EquityMultiChart
+              title="Initial Margin Used (Portfolio Daily Max)"
+              description="Initial Margin Used = |net_sym| x IM(sym)"
+              series={plotMarginEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: marginLines.portfolio }]}
+            />
+            <EquityMultiChart
+              title="Net Contracts (Per File, Stepwise)"
+              description="Net contracts over time (per file and portfolio)"
+              series={[
+                ...netposPerFileLines.perFile.filter((s) => plotMarginEnabled[s.name] !== false),
+                ...(plotMarginEnabled['Portfolio'] === false
+                  ? []
+                  : [{ name: 'Portfolio', points: netposPerFileLines.portfolio }]),
+              ]}
+            />
+            <EquityMultiChart
+              title="Net Contracts (Per Symbol, Stepwise)"
+              description="Net contracts over time (per symbol and portfolio)"
+              series={[
+                ...netposPerSymbolLines.perFile.filter((s) => plotMarginEnabled[s.name] !== false),
+                ...(plotMarginEnabled['Portfolio'] === false
+                  ? []
+                  : [{ name: 'Portfolio', points: netposPerSymbolLines.portfolio }]),
+              ]}
+            />
+            <EquityMultiChart
+              title="Net Contracts (Portfolio Stepwise)"
+              description="Net contracts over time (portfolio stepwise)"
+              series={plotMarginEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: netposPortfolioStepLines.portfolio }]}
+            />
+            <EquityMultiChart
+              title="Net Contracts (Portfolio Daily Max)"
+              description="Net contracts over time (portfolio daily max)"
+              series={plotMarginEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: netposLines.portfolio }]}
+            />
+          </>
+        ) : (
+          <>
+            <EquityMultiChart
+              title="Initial Margin Used ($)"
+              description="Initial Margin Used = |net_sym| x IM(sym)"
+              series={[
+                ...marginLines.perFile.filter((s) => plotMarginEnabled[s.name] !== false),
+                ...(plotMarginEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: marginLines.portfolio }]),
+              ]}
+            />
+            <EquityMultiChart
+              title="Net Contracts"
+              description="Net contracts over time (per file and portfolio)"
+              series={[
+                ...netposLines.perFile.filter((s) => plotMarginEnabled[s.name] !== false),
+                ...(plotMarginEnabled['Portfolio'] === false ? [] : [{ name: 'Portfolio', points: netposLines.portfolio }]),
+              ]}
+            />
+          </>
+        )}
 
       </div>
 
@@ -4284,11 +4415,19 @@ export default function HomePage() {
               netposQuery.refetch();
 
               marginQuery.refetch();
+              marginPortfolioStepQuery.refetch();
 
               histogramQuery.refetch();
 
               if (metricsRequested) {
                 metricsQuery.refetch();
+              }
+              if (showExposureDebug) {
+                netposPerFileQuery.refetch();
+                netposPerSymbolQuery.refetch();
+                netposPortfolioStepQuery.refetch();
+                marginPerFileQuery.refetch();
+                marginPerSymbolQuery.refetch();
               }
 
 

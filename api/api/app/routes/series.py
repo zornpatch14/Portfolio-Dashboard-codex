@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Callable
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from ..dependencies import DownsampleFlag, get_selection
 from ..schemas import HistogramResponse, SeriesResponse
 from ..services.data_store import store
+
+ExposureView = str
 
 router = APIRouter(prefix="/api/v1/series", tags=["series"])
 
@@ -14,10 +16,11 @@ router = APIRouter(prefix="/api/v1/series", tags=["series"])
 def _series_endpoint(name: str) -> Callable:
     async def handler(
         selection=Depends(get_selection),
+        exposure_view: ExposureView = Query(default="portfolio_daily", alias="exposure_view"),
         downsample_flag: DownsampleFlag = Depends(DownsampleFlag),
     ) -> SeriesResponse:
         downsample = downsample_flag()
-        return store.series(name, selection, downsample)
+        return store.series(name, selection, downsample, exposure_view=exposure_view)
 
     return handler
 
