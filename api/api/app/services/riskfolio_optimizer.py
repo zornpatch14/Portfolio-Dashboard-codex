@@ -126,10 +126,8 @@ class MeanRiskOptimizer:
             "msv": "MSV",
             "semi_variance": "MSV",
             "cvar": "CVaR",
-            "cdar": "CDaR",
-            "evar": "EVaR",
         }
-        return mapping.get(label.lower(), label.upper())
+        return mapping.get(label.lower(), "MV")
 
     def _objective(self, label: str) -> str:
         mapping = {
@@ -148,8 +146,6 @@ class MeanRiskOptimizer:
             "MV": "upperdev",
             "MSV": "uppersdev",
             "CVaR": "upperCVaR",
-            "CDaR": "upperCDaR",
-            "EVaR": "upperEVaR",
         }
         return mapping.get(rm_code)
 
@@ -294,10 +290,6 @@ class MeanRiskOptimizer:
             return float(rk.SemiDeviation(series))
         if rm_code == "CVaR":
             return float(rk.CVaR_Hist(series, alpha))
-        if rm_code == "CDaR":
-            return float(rk.CDaR_Abs(series, alpha))
-        if rm_code == "EVaR":
-            return float(rk.EVaR_Hist(series, alpha)[0])
         return float(np.sqrt(weights.T @ cov @ weights))
 
     def _efficient_frontier(
