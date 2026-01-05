@@ -254,8 +254,6 @@ class MeanRiskSettings(BaseModel):
     symbol_caps: List[CapConfig] = Field(default_factory=list)
     strategy_caps: List[CapConfig] = Field(default_factory=list)
     efficient_frontier_points: int = 0
-    max_risk: float | None = None
-    min_return: float | None = None
     turnover_limit: float | None = None
 
 

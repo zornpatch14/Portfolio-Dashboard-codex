@@ -357,8 +357,6 @@ export default function HomePage() {
   const [meanRiskBudget, setMeanRiskBudget] = useState(1);
   const [meanRiskSymbolCaps, setMeanRiskSymbolCaps] = useState('');
   const [meanRiskStrategyCaps, setMeanRiskStrategyCaps] = useState('');
-  const [meanRiskMaxRisk, setMeanRiskMaxRisk] = useState('');
-  const [meanRiskMinReturn, setMeanRiskMinReturn] = useState('');
   const [meanRiskTurnover, setMeanRiskTurnover] = useState('');
   const [meanRiskFrontierPoints, setMeanRiskFrontierPoints] = useState(20);
   const [meanRiskOverrides, setMeanRiskOverrides] = useState<BoundsOverrideState>({});
@@ -1289,8 +1287,6 @@ export default function HomePage() {
         },
         {} as Record<string, [number | null, number | null]>,
       );
-      const maxRiskValue = parseOptionalNumber(meanRiskMaxRisk);
-      const minReturnValue = parseOptionalNumber(meanRiskMinReturn);
       const payload: MeanRiskPayload = {
         objective: meanRiskObjective,
         risk_measure: meanRiskRiskMeasure,
@@ -1311,8 +1307,6 @@ export default function HomePage() {
         symbol_caps: parseCapsInput(meanRiskSymbolCaps),
         strategy_caps: parseCapsInput(meanRiskStrategyCaps),
         efficient_frontier_points: meanRiskFrontierPoints,
-        max_risk: maxRiskValue === null ? null : maxRiskValue / 100,
-        min_return: minReturnValue === null ? null : minReturnValue / 100,
         turnover_limit: parseOptionalNumber(meanRiskTurnover),
       };
       const response = await submitRiskfolioJob(selectionForFetch, payload);
@@ -1339,8 +1333,6 @@ export default function HomePage() {
     maxWeightBound,
     meanRiskSymbolCaps,
     meanRiskStrategyCaps,
-    meanRiskMaxRisk,
-    meanRiskMinReturn,
     meanRiskTurnover,
     meanRiskFrontierPoints,
     meanRiskOverrides,
@@ -2634,31 +2626,6 @@ export default function HomePage() {
               />
               <div className="text-muted small" style={{ marginTop: 4 }}>
                 {usesASim ? 'Used by the Tail Gini risk measure.' : 'Not used unless Tail Gini is selected.'}
-              </div>
-              <label className="field-label" htmlFor="max-risk" style={{ marginTop: 12 }}>Max Risk (annual % of selected measure)</label>
-              <input
-                id="max-risk"
-                className="input"
-                type="number"
-                min={0}
-                step={0.05}
-                value={meanRiskMaxRisk}
-                onChange={(event) => setMeanRiskMaxRisk(event.target.value)}
-              />
-              <div className="text-muted small" style={{ marginTop: 4 }}>
-                Enter an annual percentage (e.g., 10 for 10%). Converted to daily before optimization.
-              </div>
-              <label className="field-label" htmlFor="min-return" style={{ marginTop: 12 }}>Minimum Return (annual %)</label>
-              <input
-                id="min-return"
-                className="input"
-                type="number"
-                step={0.05}
-                value={meanRiskMinReturn}
-                onChange={(event) => setMeanRiskMinReturn(event.target.value)}
-              />
-              <div className="text-muted small" style={{ marginTop: 4 }}>
-                Enter an annual percentage (e.g., 5 for 5%). Converted to daily before optimization.
               </div>
               <label className="field-label" htmlFor="turnover" style={{ marginTop: 12 }}>Turnover Limit (decimal)</label>
               <input
