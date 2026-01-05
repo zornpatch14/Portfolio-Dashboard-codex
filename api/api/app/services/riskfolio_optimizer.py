@@ -50,7 +50,7 @@ class MeanRiskOptimizer:
 
         rm_code = self._risk_measure(settings.risk_measure)
         obj_code = self._objective(settings.objective)
-        kelly_mode = self._kelly_mode(settings.return_model)
+        kelly_mode = None
         risk_free = self._annual_to_daily_rate(settings.risk_free_rate)
 
         portfolio = rp.Portfolio(returns=returns)
@@ -142,16 +142,6 @@ class MeanRiskOptimizer:
             "sharpe": "Sharpe",
         }
         return mapping.get(label.lower(), "Sharpe")
-
-    def _kelly_mode(self, label: str) -> str | None:
-        mapping = {
-            "arithmetic": None,
-            "approx": "approx",
-            "approx_log": "approx",
-            "log": "exact",
-            "exact": "exact",
-        }
-        return mapping.get(label.lower(), None)
 
     def _risk_limit_attribute(self, rm_code: str) -> str | None:
         mapping = {

@@ -344,7 +344,7 @@ export default function HomePage() {
 
   const [riskfolioMode, setRiskfolioMode] = useState<'mean-risk' | 'risk-parity' | 'hierarchical'>('mean-risk');
   const [meanRiskObjective, setMeanRiskObjective] = useState('MinRisk');
-  const [meanRiskReturnModel, setMeanRiskReturnModel] = useState('approx');
+  const [meanRiskReturnModel, setMeanRiskReturnModel] = useState('arithmetic');
   const [meanRiskReturnEstimate, setMeanRiskReturnEstimate] = useState('hist');
   const [meanRiskRiskMeasure, setMeanRiskRiskMeasure] = useState('CVaR');
   const [meanRiskCovariance, setMeanRiskCovariance] = useState('ledoit');
@@ -2474,8 +2474,6 @@ export default function HomePage() {
               <label className="field-label" htmlFor="return-model" style={{ marginTop: 12 }}>Return Model</label>
               <select id="return-model" className="input" value={meanRiskReturnModel} onChange={(event) => setMeanRiskReturnModel(event.target.value)}>
                 <option value="arithmetic">Mean Historical Return (Arithmetic)</option>
-                <option value="approx">Approximate Log</option>
-                <option value="exact">Exact Log</option>
               </select>
               <label className="field-label" htmlFor="risk-measure" style={{ marginTop: 12 }}>Risk Measure</label>
               <select id="risk-measure" className="input" value={meanRiskRiskMeasure} onChange={(event) => setMeanRiskRiskMeasure(event.target.value)}>
