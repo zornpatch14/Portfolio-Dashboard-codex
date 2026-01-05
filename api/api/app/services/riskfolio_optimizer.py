@@ -128,6 +128,8 @@ class MeanRiskOptimizer:
             "mad": "MAD",
             "gmd": "GMD",
             "flpm": "FLPM",
+            "slpm": "SLPM",
+            "tg": "TG",
             "cvar": "CVaR",
         }
         return mapping.get(label.lower(), "MV")
@@ -151,6 +153,8 @@ class MeanRiskOptimizer:
             "MAD": "uppermad",
             "GMD": "uppergmd",
             "FLPM": "upperflpm",
+            "SLPM": "upperslpm",
+            "TG": "uppertg",
             "CVaR": "upperCVaR",
         }
         return mapping.get(rm_code)
@@ -269,7 +273,9 @@ class MeanRiskOptimizer:
         scenarios = returns.to_numpy()
         series = scenarios @ w_vec
         expected = float(mu.T @ w_vec)
-        risk_val = self._risk_value(rm_code, series, w_vec, cov, settings.alpha, risk_free)
+        risk_val = self._risk_value(
+            rm_code, series, w_vec, cov, settings.alpha, risk_free, settings.a_sim
+        )
         sharpe = (expected - risk_free) / risk_val if risk_val != 0 else 0.0
         max_dd = float(rk.MDD_Abs(series))
         return OptimizerSummary(
@@ -290,6 +296,7 @@ class MeanRiskOptimizer:
         cov: np.ndarray,
         alpha: float,
         risk_free: float,
+        a_sim: int,
     ) -> float:
         if rm_code == "MV":
             return float(np.sqrt(weights.T @ cov @ weights))
@@ -301,6 +308,10 @@ class MeanRiskOptimizer:
             return float(rk.GMD(series))
         if rm_code == "FLPM":
             return float(rk.LPM(series, MAR=risk_free, p=1))
+        if rm_code == "SLPM":
+            return float(rk.LPM(series, MAR=risk_free, p=2))
+        if rm_code == "TG":
+            return float(rk.TG(series, alpha=alpha, a_sim=a_sim))
         if rm_code == "CVaR":
             return float(rk.CVaR_Hist(series, alpha))
         return float(np.sqrt(weights.T @ cov @ weights))
@@ -338,7 +349,9 @@ class MeanRiskOptimizer:
             w = frontier[column].astype(float).to_numpy().reshape((-1, 1))
             series = scenarios @ w
             expected = float(mu.T @ w)
-            risk_val = self._risk_value(rm_code, series, w, cov, settings.alpha, risk_free)
+            risk_val = self._risk_value(
+                rm_code, series, w, cov, settings.alpha, risk_free, settings.a_sim
+            )
             weights_dict = {asset: float(frontier.loc[asset, column]) for asset in frontier.index}
             data.append(
                 FrontierPoint(

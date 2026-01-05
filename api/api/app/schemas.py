@@ -248,6 +248,7 @@ class MeanRiskSettings(BaseModel):
     risk_free_rate: float = 0.0
     risk_aversion: float = 2.0
     alpha: float = 0.05
+    a_sim: int = 100
     budget: float = 1.0
     bounds: BoundsConfig = Field(default_factory=BoundsConfig)
     symbol_caps: List[CapConfig] = Field(default_factory=list)

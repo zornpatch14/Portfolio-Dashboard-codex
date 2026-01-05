@@ -351,6 +351,7 @@ export default function HomePage() {
   const [meanRiskRiskFree, setMeanRiskRiskFree] = useState(5);
   const [meanRiskRiskAversion, setMeanRiskRiskAversion] = useState(2);
   const [meanRiskAlpha, setMeanRiskAlpha] = useState(0.05);
+  const [meanRiskASim, setMeanRiskASim] = useState(100);
   const [meanRiskMinBound, setMeanRiskMinBound] = useState('0');
   const [meanRiskMaxBound, setMeanRiskMaxBound] = useState('1');
   const [meanRiskBudget, setMeanRiskBudget] = useState(1);
@@ -1286,6 +1287,7 @@ export default function HomePage() {
         risk_free_rate: meanRiskRiskFree / 100,
         risk_aversion: meanRiskRiskAversion,
         alpha: meanRiskAlpha,
+        a_sim: meanRiskASim,
         budget: meanRiskBudget,
         bounds: {
           default_min: minWeightBound,
@@ -1317,6 +1319,7 @@ export default function HomePage() {
     meanRiskRiskFree,
     meanRiskRiskAversion,
     meanRiskAlpha,
+    meanRiskASim,
     meanRiskBudget,
     minWeightBound,
     maxWeightBound,
@@ -2482,6 +2485,8 @@ export default function HomePage() {
                 <option value="MAD">Mean Absolute Deviation (MAD)</option>
                 <option value="GMD">Gini Mean Difference (GMD)</option>
                 <option value="FLPM">First Lower Partial Moment (Omega)</option>
+                <option value="SLPM">Second Lower Partial Moment (Sortino)</option>
+                <option value="TG">Tail Gini</option>
                 <option value="CVaR">CVaR</option>
               </select>
               <label className="field-label" htmlFor="cov-method" style={{ marginTop: 12 }}>Covariance Method</label>
@@ -2587,6 +2592,16 @@ export default function HomePage() {
               <div className="text-muted small" style={{ marginTop: 4 }}>
                 Example: 0.05 corresponds to a 95% confidence level.
               </div>
+              <label className="field-label" htmlFor="a-sim" style={{ marginTop: 12 }}>Tail Gini CVaR Samples (a_sim)</label>
+              <input
+                id="a-sim"
+                className="input"
+                type="number"
+                min={1}
+                step={1}
+                value={meanRiskASim}
+                onChange={(event) => setMeanRiskASim(Number(event.target.value))}
+              />
               <label className="field-label" htmlFor="max-risk" style={{ marginTop: 12 }}>Max Risk (selected measure, decimal)</label>
               <input
                 id="max-risk"
