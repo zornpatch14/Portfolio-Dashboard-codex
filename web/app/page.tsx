@@ -368,6 +368,18 @@ export default function HomePage() {
   const [optimizerError, setOptimizerError] = useState<string | null>(null);
   const [riskfolioApplyMessage, setRiskfolioApplyMessage] = useState<string | null>(null);
 
+  const usesRiskFreeRate =
+    meanRiskObjective === 'Sharpe' || meanRiskRiskMeasure === 'FLPM' || meanRiskRiskMeasure === 'SLPM';
+  const usesAlpha = meanRiskRiskMeasure === 'CVaR' || meanRiskRiskMeasure === 'TG';
+  const usesASim = meanRiskRiskMeasure === 'TG';
+  const usesRiskAversion = meanRiskObjective === 'Utility';
+  const usesMar = meanRiskRiskMeasure === 'FLPM' || meanRiskRiskMeasure === 'SLPM';
+  const riskFreeHelper = usesMar
+    ? 'Used as MAR (minimum acceptable return) for FLPM/SLPM.'
+    : meanRiskObjective === 'Sharpe'
+      ? 'Used to compute the risk-adjusted return (Sharpe objective).'
+      : 'Not used by the current objective or risk measure.';
+
   const minWeightBound = useMemo(() => parseWeightInputValue(meanRiskMinBound, 0), [meanRiskMinBound]);
   const maxWeightBound = useMemo(() => parseWeightInputValue(meanRiskMaxBound, 1), [meanRiskMaxBound]);
 
@@ -2572,7 +2584,11 @@ export default function HomePage() {
                 step={0.05}
                 value={meanRiskRiskFree}
                 onChange={(event) => setMeanRiskRiskFree(Number(event.target.value))}
+                disabled={!usesRiskFreeRate}
               />
+              <div className="text-muted small" style={{ marginTop: 4 }}>
+                {riskFreeHelper}
+              </div>
               <label className="field-label" htmlFor="risk-aversion" style={{ marginTop: 12 }}>Risk Aversion (Utility only)</label>
               <input
                 id="risk-aversion"
@@ -2581,7 +2597,11 @@ export default function HomePage() {
                 step={0.1}
                 value={meanRiskRiskAversion}
                 onChange={(event) => setMeanRiskRiskAversion(Number(event.target.value))}
+                disabled={!usesRiskAversion}
               />
+              <div className="text-muted small" style={{ marginTop: 4 }}>
+                {usesRiskAversion ? 'Used by the Utility objective.' : 'Not used unless Utility is selected.'}
+              </div>
               <label className="field-label" htmlFor="alpha" style={{ marginTop: 12 }}>Tail Probability (alpha)</label>
               <input
                 id="alpha"
@@ -2592,9 +2612,12 @@ export default function HomePage() {
                 step={0.01}
                 value={meanRiskAlpha}
                 onChange={(event) => setMeanRiskAlpha(Number(event.target.value))}
+                disabled={!usesAlpha}
               />
               <div className="text-muted small" style={{ marginTop: 4 }}>
-                Example: 0.05 corresponds to a 95% confidence level.
+                {usesAlpha
+                  ? 'Example: 0.05 corresponds to a 95% confidence level.'
+                  : 'Not used unless the risk measure is CVaR or Tail Gini.'}
               </div>
               <label className="field-label" htmlFor="a-sim" style={{ marginTop: 12 }}>Tail Gini CVaR Samples (a_sim)</label>
               <input
@@ -2605,7 +2628,11 @@ export default function HomePage() {
                 step={1}
                 value={meanRiskASim}
                 onChange={(event) => setMeanRiskASim(Number(event.target.value))}
+                disabled={!usesASim}
               />
+              <div className="text-muted small" style={{ marginTop: 4 }}>
+                {usesASim ? 'Used by the Tail Gini risk measure.' : 'Not used unless Tail Gini is selected.'}
+              </div>
               <label className="field-label" htmlFor="max-risk" style={{ marginTop: 12 }}>Max Risk (selected measure, decimal)</label>
               <input
                 id="max-risk"
