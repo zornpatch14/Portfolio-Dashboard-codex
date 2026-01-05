@@ -73,7 +73,7 @@ class MeanRiskOptimizer:
             portfolio.ainequality = A
             portfolio.binequality = b
 
-        portfolio.assets_stats(method_mu=settings.method_mu, method_cov=settings.method_cov)
+        portfolio.assets_stats(method_mu=settings.method_mu, method_cov="ledoit")
 
         try:
             weights_df = portfolio.optimization(

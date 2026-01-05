@@ -2485,8 +2485,6 @@ export default function HomePage() {
               </select>
               <label className="field-label" htmlFor="cov-method" style={{ marginTop: 12 }}>Covariance Method</label>
               <select id="cov-method" className="input" value={meanRiskCovariance} onChange={(event) => setMeanRiskCovariance(event.target.value)}>
-                <option value="hist">Sample (Historical)</option>
-                <option value="ewma1">Exponentially Weighted (EWMA)</option>
                 <option value="ledoit">Ledoit-Wolf</option>
               </select>
               <label className="field-label" htmlFor="mu-method" style={{ marginTop: 12 }}>Mean Return Estimator</label>

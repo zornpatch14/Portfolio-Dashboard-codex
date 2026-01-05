@@ -243,7 +243,7 @@ class MeanRiskSettings(BaseModel):
     risk_measure: str = "MV"
     return_model: str = "arithmetic"
     method_mu: str = "hist"
-    method_cov: str = "hist"
+    method_cov: str = "ledoit"
     solver: Optional[str] = None
     risk_free_rate: float = 0.0
     risk_aversion: float = 2.0
