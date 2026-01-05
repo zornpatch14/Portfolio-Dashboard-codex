@@ -2479,6 +2479,7 @@ export default function HomePage() {
               <select id="risk-measure" className="input" value={meanRiskRiskMeasure} onChange={(event) => setMeanRiskRiskMeasure(event.target.value)}>
                 <option value="MV">Variance / Standard Deviation</option>
                 <option value="MSV">Semi-Variance</option>
+                <option value="MAD">Mean Absolute Deviation (MAD)</option>
                 <option value="CVaR">CVaR</option>
               </select>
               <label className="field-label" htmlFor="cov-method" style={{ marginTop: 12 }}>Covariance Method</label>
