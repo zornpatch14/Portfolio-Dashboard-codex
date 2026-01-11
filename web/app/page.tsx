@@ -15,8 +15,10 @@ import { CorrelationHeatmap } from '../components/CorrelationHeatmap';
 import { EquityMultiChart } from '../components/EquityMultiChart';
 import { EfficientFrontierChart } from '../components/EfficientFrontierChart';
 import { FrontierAllocationAreaChart } from '../components/FrontierAllocationAreaChart';
+import { CtaTimeSeriesChart } from '../components/CtaTimeSeriesChart';
 
 import {
+  fetchCta,
   fetchHistogram,
   fetchMetrics,
   fetchSeries,
@@ -93,6 +95,11 @@ const formatPercent = (value: number | null | undefined, digits = 2) => {
 const formatCurrency = (value: number | null | undefined) => {
   if (value === undefined || value === null || Number.isNaN(value)) return '--';
   return `$${value.toLocaleString()}`;
+};
+
+const formatDecimal = (value: number | null | undefined, digits = 2) => {
+  if (value === undefined || value === null || Number.isNaN(value)) return '--';
+  return value.toFixed(digits);
 };
 
 const formatHistogramDollar = (value: number) =>
@@ -1470,6 +1477,13 @@ export default function HomePage() {
 
     enabled: canQueryData,
 
+  });
+
+  const ctaQuery = useQuery({
+    queryKey: ['cta', selectionKey],
+    queryFn: () => fetchCta(selectionForFetch),
+    staleTime: STALE_TIME,
+    enabled: canQueryData,
   });
 
   const metricsQuery = useQuery({
@@ -3061,76 +3075,160 @@ export default function HomePage() {
 };
 
 
-  const renderCta = () => (
+  const renderCta = () => {
+    if (!hasFiles) {
+      return renderUploadPlaceholder('CTA report');
+    }
 
-    <div className="panel" style={{ marginTop: 8 }}>
+    const ctaData = ctaQuery.data;
+    const monthlyRows = ctaData?.monthly ?? [];
+    const monthlyPnL = ctaData?.monthly_pnl ?? [];
+    const monthlyReturn = ctaData?.monthly_return ?? [];
+    const rollingPnL = ctaData?.rolling_pnl ?? [];
+    const rollingReturn = ctaData?.rolling_return ?? [];
+    const ctaError = ctaQuery.isError ? getQueryErrorMessage(ctaQuery.error) : null;
+    const isLoading = ctaQuery.isFetching && !ctaData;
 
-      <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+    const renderChart = (
+      title: string,
+      points: { timestamp: string; value: number }[],
+      type: 'line' | 'bar',
+      valueFormatter: (value: number) => string,
+    ) => {
+      if (ctaError) {
+        return (
+          <div className="card">
+            <strong>{title}</strong>
+            <div className="placeholder-text">{ctaError}</div>
+          </div>
+        );
+      }
+      if (isLoading) {
+        return (
+          <div className="card">
+            <strong>{title}</strong>
+            <div className="placeholder-text">Loading CTA charts...</div>
+          </div>
+        );
+      }
+      if (!points.length) {
+        return (
+          <div className="card">
+            <strong>{title}</strong>
+            <div className="placeholder-text">No data available for this chart.</div>
+          </div>
+        );
+      }
+      return (
+        <div className="card">
+          <CtaTimeSeriesChart title={title} points={points} type={type} valueFormatter={valueFormatter} />
+        </div>
+      );
+    };
 
-        <h3 className="section-title" style={{ margin: 0 }}>CTA-Style Report</h3>
-
-        <div className="badge">Coming soon</div>
-
-      </div>
-
-      <p className="text-muted small" style={{ marginTop: 4 }}>
-
-        This tab will eventually mirror the Dash CTA report (ROI summary, monthly/annual ROR tables, downloads). Until the
-        backend is finalized, data is intentionally withheld.
-
-      </p>
-
-      <div className="card" style={{ marginTop: 12 }}>
-
-        <div className="placeholder-text">
-
-          {hasFiles
-
-            ? 'CTA analytics will appear here once implemented.'
-
-            : 'Upload files now so CTA analytics can run when the feature launches.'}
-
+    return (
+      <div className="panel" style={{ marginTop: 8 }}>
+        <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 className="section-title" style={{ margin: 0 }}>CTA-Style Report</h3>
+          {activeBadge}
         </div>
 
-      </div>
-
-      <div className="card" style={{ marginTop: 14 }}>
-
-        <strong>Download actions</strong>
-
-        <div className="flex gap-md" style={{ marginTop: 10, flexWrap: 'wrap' }}>
-
-          <button className="button" type="button" disabled>
-
-            Export monthly ROR (CSV)
-
-          </button>
-
-          <button className="button" type="button" disabled>
-
-            Export annual ROR (CSV)
-
-          </button>
-
-          <button className="button" type="button" disabled>
-
-            Export metrics (CSV/Parquet)
-
-          </button>
-
+        <div className="grid-2" style={{ marginTop: 12 }}>
+          <div className="card">
+            <strong>Nominal returns (non-reinvested)</strong>
+            <div className="text-muted small" style={{ marginTop: 6 }}>
+              Monthly returns are additive and based on the account equity input from Load Trade Lists. PnL values are
+              nominal and do not assume reinvestment.
+            </div>
+          </div>
+          <div className="card">
+            <strong>Reinvestment note</strong>
+            <div className="text-muted small" style={{ marginTop: 6 }}>
+              Rolling 12-month % returns sum the monthly return series without compounding. Use this series if you want
+              to model reinvestment assumptions separately.
+            </div>
+          </div>
         </div>
 
-        <div className="text-muted small" style={{ marginTop: 8 }}>
-
-          Hooks mirror Dash exports; backend wiring will route to /api/v1/export once implemented.
-
+        <div className="card" style={{ marginTop: 12 }}>
+          <strong>Monthly performance (portfolio)</strong>
+          <div className="text-muted small" style={{ marginTop: 4 }}>
+            Monthly buckets follow the active date range from Load Trade Lists.
+          </div>
+          {ctaError ? (
+            <div className="placeholder-text">{ctaError}</div>
+          ) : isLoading ? (
+            <div className="placeholder-text">Loading CTA metrics...</div>
+          ) : monthlyRows.length ? (
+            <div className="table-wrapper" style={{ marginTop: 10 }}>
+              <table className="compact-table">
+                <thead>
+                  <tr>
+                    <th>Month</th>
+                    <th>Total PnL</th>
+                    <th>Drawdown</th>
+                    <th>Median Daily PnL</th>
+                    <th>Sharpe</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthlyRows.map((row) => (
+                    <tr key={row.month_start}>
+                      <td>{row.label}</td>
+                      <td>{formatCurrency(row.total_pnl)}</td>
+                      <td>{formatCurrency(row.drawdown)}</td>
+                      <td>{formatCurrency(row.median_daily_pnl)}</td>
+                      <td>{formatDecimal(row.sharpe)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="placeholder-text">No monthly data available for this selection.</div>
+          )}
         </div>
 
+        <div className="grid-2" style={{ marginTop: 12 }}>
+          {renderChart(
+            'Monthly Return (%)',
+            monthlyReturn,
+            'bar',
+            (value) => `${(value * 100).toFixed(2)}%`,
+          )}
+          {renderChart('Monthly PnL ($)', monthlyPnL, 'bar', (value) => formatCurrency(value))}
+        </div>
+
+        <div className="grid-2" style={{ marginTop: 12 }}>
+          {renderChart('Rolling 12-Month PnL ($)', rollingPnL, 'line', (value) => formatCurrency(value))}
+          {renderChart(
+            'Rolling 12-Month Return (%)',
+            rollingReturn,
+            'line',
+            (value) => `${(value * 100).toFixed(2)}%`,
+          )}
+        </div>
+
+        <div className="card" style={{ marginTop: 14 }}>
+          <strong>Download actions</strong>
+          <div className="flex gap-md" style={{ marginTop: 10, flexWrap: 'wrap' }}>
+            <button className="button" type="button" disabled>
+              Export monthly ROR (CSV)
+            </button>
+            <button className="button" type="button" disabled>
+              Export annual ROR (CSV)
+            </button>
+            <button className="button" type="button" disabled>
+              Export metrics (CSV/Parquet)
+            </button>
+          </div>
+          <div className="text-muted small" style={{ marginTop: 8 }}>
+            Export hooks mirror the Dash flow; backend wiring will route to /api/v1/export once implemented.
+          </div>
+        </div>
       </div>
-
-    </div>
-
-  );
+    );
+  };
 
 
 

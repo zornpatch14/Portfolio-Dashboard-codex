@@ -10,7 +10,7 @@ import logging
 
 import math
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pathlib import Path
 
@@ -55,29 +55,19 @@ from api.app.dependencies import selection_hash
 from api.app.services.cache import build_selection_key, get_cache_backend
 
 from api.app.schemas import (
-
+    CTAMonthlyRow,
+    CTAResponse,
     FileMetadata,
-
     FileUploadResponse,
-
     HistogramBucket,
-
     HistogramResponse,
-
     MetricsBlock,
-
     MetricsResponse,
-
     Selection,
-
     SelectionMeta,
-
     SeriesPoint,
-
     SeriesContributor,
-
     SeriesResponse,
-
 )
 
 
@@ -1761,6 +1751,111 @@ class DataStore:
 
         return HistogramResponse(label="return_distribution", selection=selection, buckets=buckets)
 
+
+    def cta(self, selection: Selection) -> CTAResponse:
+        view = self._view_for_selection(selection)
+        daily = view.daily_returns
+
+        if daily.is_empty():
+            return CTAResponse(selection=selection)
+
+        daily = (
+            daily.sort("date")
+            .with_columns(pl.col("date").dt.truncate("1mo").alias("month_start"))
+            .with_columns(pl.col("pnl").cum_sum().over("month_start").alias("month_cum_pnl"))
+        )
+
+        monthly = (
+            daily.group_by("month_start")
+            .agg(
+                total_pnl=pl.col("pnl").sum(),
+                drawdown=pl.col("month_cum_pnl").min(),
+                median_daily_pnl=pl.col("pnl").median(),
+                mean_return=pl.col("daily_return").mean(),
+                std_return=pl.col("daily_return").std(),
+                count=pl.col("daily_return").count(),
+            )
+            .sort("month_start")
+            .with_columns(
+                pl.col("mean_return").fill_null(0.0),
+                pl.col("std_return").fill_null(0.0),
+            )
+            .with_columns(
+                pl.when(pl.col("drawdown") < 0)
+                .then(pl.col("drawdown"))
+                .otherwise(0.0)
+                .alias("drawdown"),
+                pl.when((pl.col("std_return") > 0) & (pl.col("count") > 1))
+                .then(
+                    (pl.col("mean_return") / pl.col("std_return"))
+                    * pl.col("count").cast(pl.Float64).sqrt()
+                )
+                .otherwise(0.0)
+                .alias("sharpe"),
+                pl.col("month_start").dt.strftime("%B %Y").alias("label"),
+            )
+        )
+
+        account_equity = float(selection.account_equity or 0.0)
+        monthly_rows: list[CTAMonthlyRow] = []
+        monthly_pnl_points: list[SeriesPoint] = []
+        monthly_return_points: list[SeriesPoint] = []
+
+        month_starts: list[date] = []
+        monthly_pnls: list[float] = []
+        monthly_returns: list[float] = []
+
+        for row in monthly.iter_rows(named=True):
+            month_start = row["month_start"]
+            total_pnl = float(row["total_pnl"]) if row["total_pnl"] is not None else 0.0
+            drawdown = float(row["drawdown"]) if row["drawdown"] is not None else 0.0
+            median_daily_pnl = (
+                float(row["median_daily_pnl"]) if row["median_daily_pnl"] is not None else 0.0
+            )
+            sharpe = float(row["sharpe"]) if row["sharpe"] is not None else 0.0
+            label = row["label"] or month_start.strftime("%B %Y")
+
+            monthly_rows.append(
+                CTAMonthlyRow(
+                    month_start=month_start,
+                    label=label,
+                    total_pnl=total_pnl,
+                    drawdown=drawdown,
+                    median_daily_pnl=median_daily_pnl,
+                    sharpe=sharpe,
+                )
+            )
+
+            timestamp = datetime.combine(month_start, datetime.min.time())
+            monthly_pnl_points.append(SeriesPoint(timestamp=timestamp, value=total_pnl))
+            monthly_return = total_pnl / account_equity if account_equity > 0 else 0.0
+            monthly_return_points.append(SeriesPoint(timestamp=timestamp, value=monthly_return))
+
+            month_starts.append(month_start)
+            monthly_pnls.append(total_pnl)
+            monthly_returns.append(monthly_return)
+
+        rolling_pnl_points: list[SeriesPoint] = []
+        rolling_return_points: list[SeriesPoint] = []
+        window = 12
+        for idx in range(len(month_starts)):
+            if idx + 1 < window:
+                continue
+            start_idx = idx + 1 - window
+            rolling_pnl = float(sum(monthly_pnls[start_idx : idx + 1]))
+            rolling_return = float(sum(monthly_returns[start_idx : idx + 1]))
+            timestamp = datetime.combine(month_starts[idx], datetime.min.time())
+            rolling_pnl_points.append(SeriesPoint(timestamp=timestamp, value=rolling_pnl))
+            rolling_return_points.append(SeriesPoint(timestamp=timestamp, value=rolling_return))
+
+        return CTAResponse(
+            selection=selection,
+            monthly=monthly_rows,
+            monthly_pnl=monthly_pnl_points,
+            monthly_return=monthly_return_points,
+            rolling_pnl=rolling_pnl_points,
+            rolling_return=rolling_return_points,
+        )
 
 
     def metrics(self, selection: Selection) -> MetricsResponse:

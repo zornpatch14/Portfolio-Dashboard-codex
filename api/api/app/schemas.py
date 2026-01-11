@@ -199,29 +199,22 @@ class CorrelationResponse(BaseModel):
 
 
 
-class CTARecord(BaseModel):
-
-    file_id: str
-
-    symbol: str
-
-    interval: str
-
-    strategy: str
-
-    score: float
-
-    description: Optional[str] = None
-
-
-
+class CTAMonthlyRow(BaseModel):
+    month_start: date
+    label: str
+    total_pnl: float
+    drawdown: float
+    median_daily_pnl: float
+    sharpe: float
 
 
 class CTAResponse(BaseModel):
-
     selection: Selection
-
-    records: List[CTARecord]
+    monthly: List[CTAMonthlyRow] = Field(default_factory=list)
+    monthly_pnl: List[SeriesPoint] = Field(default_factory=list)
+    monthly_return: List[SeriesPoint] = Field(default_factory=list)
+    rolling_pnl: List[SeriesPoint] = Field(default_factory=list)
+    rolling_return: List[SeriesPoint] = Field(default_factory=list)
 
 
 
@@ -343,4 +336,3 @@ class ExportResponse(BaseModel):
     job_id: Optional[str] = None
     content_type: str
     filename: str
-
