@@ -243,18 +243,17 @@ class MeanRiskSettings(BaseModel):
     risk_measure: str = "MV"
     return_model: str = "arithmetic"
     method_mu: str = "hist"
-    method_cov: str = "hist"
+    method_cov: str = "ledoit"
     solver: Optional[str] = None
     risk_free_rate: float = 0.0
     risk_aversion: float = 2.0
     alpha: float = 0.05
+    a_sim: int = 100
     budget: float = 1.0
     bounds: BoundsConfig = Field(default_factory=BoundsConfig)
     symbol_caps: List[CapConfig] = Field(default_factory=list)
     strategy_caps: List[CapConfig] = Field(default_factory=list)
     efficient_frontier_points: int = 0
-    max_risk: float | None = None
-    min_return: float | None = None
     turnover_limit: float | None = None
 
 

@@ -344,20 +344,19 @@ export default function HomePage() {
 
   const [riskfolioMode, setRiskfolioMode] = useState<'mean-risk' | 'risk-parity' | 'hierarchical'>('mean-risk');
   const [meanRiskObjective, setMeanRiskObjective] = useState('MinRisk');
-  const [meanRiskReturnModel, setMeanRiskReturnModel] = useState('approx');
+  const [meanRiskReturnModel, setMeanRiskReturnModel] = useState('arithmetic');
   const [meanRiskReturnEstimate, setMeanRiskReturnEstimate] = useState('hist');
   const [meanRiskRiskMeasure, setMeanRiskRiskMeasure] = useState('CVaR');
   const [meanRiskCovariance, setMeanRiskCovariance] = useState('ledoit');
   const [meanRiskRiskFree, setMeanRiskRiskFree] = useState(5);
   const [meanRiskRiskAversion, setMeanRiskRiskAversion] = useState(2);
   const [meanRiskAlpha, setMeanRiskAlpha] = useState(0.05);
+  const [meanRiskASim, setMeanRiskASim] = useState(100);
   const [meanRiskMinBound, setMeanRiskMinBound] = useState('0');
   const [meanRiskMaxBound, setMeanRiskMaxBound] = useState('1');
   const [meanRiskBudget, setMeanRiskBudget] = useState(1);
   const [meanRiskSymbolCaps, setMeanRiskSymbolCaps] = useState('');
   const [meanRiskStrategyCaps, setMeanRiskStrategyCaps] = useState('');
-  const [meanRiskMaxRisk, setMeanRiskMaxRisk] = useState('');
-  const [meanRiskMinReturn, setMeanRiskMinReturn] = useState('');
   const [meanRiskTurnover, setMeanRiskTurnover] = useState('');
   const [meanRiskFrontierPoints, setMeanRiskFrontierPoints] = useState(20);
   const [meanRiskOverrides, setMeanRiskOverrides] = useState<BoundsOverrideState>({});
@@ -366,6 +365,18 @@ export default function HomePage() {
   const [optimizerLoading, setOptimizerLoading] = useState(false);
   const [optimizerError, setOptimizerError] = useState<string | null>(null);
   const [riskfolioApplyMessage, setRiskfolioApplyMessage] = useState<string | null>(null);
+
+  const usesRiskFreeRate =
+    meanRiskObjective === 'Sharpe' || meanRiskRiskMeasure === 'FLPM' || meanRiskRiskMeasure === 'SLPM';
+  const usesAlpha = meanRiskRiskMeasure === 'CVaR' || meanRiskRiskMeasure === 'TG';
+  const usesASim = meanRiskRiskMeasure === 'TG';
+  const usesRiskAversion = meanRiskObjective === 'Utility';
+  const usesMar = meanRiskRiskMeasure === 'FLPM' || meanRiskRiskMeasure === 'SLPM';
+  const riskFreeHelper = usesMar
+    ? 'Used as MAR (minimum acceptable return) for FLPM/SLPM.'
+    : meanRiskObjective === 'Sharpe'
+      ? 'Used to compute the risk-adjusted return (Sharpe objective).'
+      : 'Not used by the current objective or risk measure.';
 
   const minWeightBound = useMemo(() => parseWeightInputValue(meanRiskMinBound, 0), [meanRiskMinBound]);
   const maxWeightBound = useMemo(() => parseWeightInputValue(meanRiskMaxBound, 1), [meanRiskMaxBound]);
@@ -1286,6 +1297,7 @@ export default function HomePage() {
         risk_free_rate: meanRiskRiskFree / 100,
         risk_aversion: meanRiskRiskAversion,
         alpha: meanRiskAlpha,
+        a_sim: meanRiskASim,
         budget: meanRiskBudget,
         bounds: {
           default_min: minWeightBound,
@@ -1295,8 +1307,6 @@ export default function HomePage() {
         symbol_caps: parseCapsInput(meanRiskSymbolCaps),
         strategy_caps: parseCapsInput(meanRiskStrategyCaps),
         efficient_frontier_points: meanRiskFrontierPoints,
-        max_risk: parseOptionalNumber(meanRiskMaxRisk),
-        min_return: parseOptionalNumber(meanRiskMinReturn),
         turnover_limit: parseOptionalNumber(meanRiskTurnover),
       };
       const response = await submitRiskfolioJob(selectionForFetch, payload);
@@ -1317,13 +1327,12 @@ export default function HomePage() {
     meanRiskRiskFree,
     meanRiskRiskAversion,
     meanRiskAlpha,
+    meanRiskASim,
     meanRiskBudget,
     minWeightBound,
     maxWeightBound,
     meanRiskSymbolCaps,
     meanRiskStrategyCaps,
-    meanRiskMaxRisk,
-    meanRiskMinReturn,
     meanRiskTurnover,
     meanRiskFrontierPoints,
     meanRiskOverrides,
@@ -2474,21 +2483,24 @@ export default function HomePage() {
               <label className="field-label" htmlFor="return-model" style={{ marginTop: 12 }}>Return Model</label>
               <select id="return-model" className="input" value={meanRiskReturnModel} onChange={(event) => setMeanRiskReturnModel(event.target.value)}>
                 <option value="arithmetic">Mean Historical Return (Arithmetic)</option>
-                <option value="approx">Approximate Log</option>
-                <option value="exact">Exact Log</option>
               </select>
               <label className="field-label" htmlFor="risk-measure" style={{ marginTop: 12 }}>Risk Measure</label>
               <select id="risk-measure" className="input" value={meanRiskRiskMeasure} onChange={(event) => setMeanRiskRiskMeasure(event.target.value)}>
-                <option value="MV">Variance / Standard Deviation</option>
-                <option value="MSV">Semi-Variance</option>
-                <option value="CVaR">CVaR</option>
-                <option value="CDaR">CDaR</option>
-                <option value="EVaR">EVaR</option>
+                <optgroup label="Dispersion">
+                  <option value="MV">Variance / Standard Deviation</option>
+                  <option value="MAD">Mean Absolute Deviation (MAD)</option>
+                  <option value="GMD">Gini Mean Difference (GMD)</option>
+                </optgroup>
+                <optgroup label="Downside">
+                  <option value="MSV">Semi-Variance</option>
+                  <option value="FLPM">First Lower Partial Moment (Omega)</option>
+                  <option value="SLPM">Second Lower Partial Moment (Sortino)</option>
+                  <option value="TG">Tail Gini</option>
+                  <option value="CVaR">CVaR</option>
+                </optgroup>
               </select>
               <label className="field-label" htmlFor="cov-method" style={{ marginTop: 12 }}>Covariance Method</label>
               <select id="cov-method" className="input" value={meanRiskCovariance} onChange={(event) => setMeanRiskCovariance(event.target.value)}>
-                <option value="hist">Sample (Historical)</option>
-                <option value="ewma1">Exponentially Weighted (EWMA)</option>
                 <option value="ledoit">Ledoit-Wolf</option>
               </select>
               <label className="field-label" htmlFor="mu-method" style={{ marginTop: 12 }}>Mean Return Estimator</label>
@@ -2499,9 +2511,6 @@ export default function HomePage() {
                 onChange={(event) => setMeanRiskReturnEstimate(event.target.value)}
               >
                 <option value="hist">Sample Mean (Historical)</option>
-                <option value="ewma1">EWMA (lambda=0.94)</option>
-                <option value="ewma2">EWMA (lambda=0.97)</option>
-                <option value="ewma3">EWMA (lambda=0.99)</option>
               </select>
               <label className="field-label" htmlFor="bounds" style={{ marginTop: 12 }}>Weight Bounds (min / max)</label>
               <div className="flex gap-sm">
@@ -2569,7 +2578,11 @@ export default function HomePage() {
                 step={0.05}
                 value={meanRiskRiskFree}
                 onChange={(event) => setMeanRiskRiskFree(Number(event.target.value))}
+                disabled={!usesRiskFreeRate}
               />
+              <div className="text-muted small" style={{ marginTop: 4 }}>
+                {riskFreeHelper}
+              </div>
               <label className="field-label" htmlFor="risk-aversion" style={{ marginTop: 12 }}>Risk Aversion (Utility only)</label>
               <input
                 id="risk-aversion"
@@ -2578,7 +2591,11 @@ export default function HomePage() {
                 step={0.1}
                 value={meanRiskRiskAversion}
                 onChange={(event) => setMeanRiskRiskAversion(Number(event.target.value))}
+                disabled={!usesRiskAversion}
               />
+              <div className="text-muted small" style={{ marginTop: 4 }}>
+                {usesRiskAversion ? 'Used by the Utility objective.' : 'Not used unless Utility is selected.'}
+              </div>
               <label className="field-label" htmlFor="alpha" style={{ marginTop: 12 }}>Tail Probability (alpha)</label>
               <input
                 id="alpha"
@@ -2589,26 +2606,27 @@ export default function HomePage() {
                 step={0.01}
                 value={meanRiskAlpha}
                 onChange={(event) => setMeanRiskAlpha(Number(event.target.value))}
+                disabled={!usesAlpha}
               />
               <div className="text-muted small" style={{ marginTop: 4 }}>
-                Example: 0.05 corresponds to a 95% confidence level.
+                {usesAlpha
+                  ? 'Example: 0.05 corresponds to a 95% confidence level.'
+                  : 'Not used unless the risk measure is CVaR or Tail Gini.'}
               </div>
-              <label className="field-label" htmlFor="max-risk" style={{ marginTop: 12 }}>Max Risk (selected measure, decimal)</label>
+              <label className="field-label" htmlFor="a-sim" style={{ marginTop: 12 }}>Tail Gini CVaR Samples (a_sim)</label>
               <input
-                id="max-risk"
+                id="a-sim"
                 className="input"
                 type="number"
-                value={meanRiskMaxRisk}
-                onChange={(event) => setMeanRiskMaxRisk(event.target.value)}
+                min={1}
+                step={1}
+                value={meanRiskASim}
+                onChange={(event) => setMeanRiskASim(Number(event.target.value))}
+                disabled={!usesASim}
               />
-              <label className="field-label" htmlFor="min-return" style={{ marginTop: 12 }}>Minimum Return (decimal)</label>
-              <input
-                id="min-return"
-                className="input"
-                type="number"
-                value={meanRiskMinReturn}
-                onChange={(event) => setMeanRiskMinReturn(event.target.value)}
-              />
+              <div className="text-muted small" style={{ marginTop: 4 }}>
+                {usesASim ? 'Used by the Tail Gini risk measure.' : 'Not used unless Tail Gini is selected.'}
+              </div>
               <label className="field-label" htmlFor="turnover" style={{ marginTop: 12 }}>Turnover Limit (decimal)</label>
               <input
                 id="turnover"

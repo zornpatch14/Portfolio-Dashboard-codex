@@ -55,18 +55,13 @@ class MeanRiskOptimizer:
 
         portfolio = rp.Portfolio(returns=returns)
         portfolio.alpha = settings.alpha
+        portfolio.a_sim = settings.a_sim
         portfolio.lowerlng = settings.bounds.default_min
         portfolio.upperlng = settings.bounds.default_max
         portfolio.budget = settings.budget
-        if settings.min_return is not None:
-            portfolio.lowerret = settings.min_return
         if settings.turnover_limit is not None:
             portfolio.allowTO = True
             portfolio.turnover = settings.turnover_limit
-        if settings.max_risk is not None:
-            limit_attr = self._risk_limit_attribute(rm_code)
-            if limit_attr:
-                setattr(portfolio, limit_attr, settings.max_risk)
 
         A, b = self._linear_constraints(metas, returns.columns.tolist(), settings)
         if A is not None and b is not None:
@@ -125,11 +120,14 @@ class MeanRiskOptimizer:
             "mv": "MV",
             "msv": "MSV",
             "semi_variance": "MSV",
+            "mad": "MAD",
+            "gmd": "GMD",
+            "flpm": "FLPM",
+            "slpm": "SLPM",
+            "tg": "TG",
             "cvar": "CVaR",
-            "cdar": "CDaR",
-            "evar": "EVaR",
         }
-        return mapping.get(label.lower(), label.upper())
+        return mapping.get(label.lower(), "MV")
 
     def _objective(self, label: str) -> str:
         mapping = {
@@ -146,10 +144,6 @@ class MeanRiskOptimizer:
     def _kelly_mode(self, label: str) -> str | None:
         mapping = {
             "arithmetic": None,
-            "approx": "approx",
-            "approx_log": "approx",
-            "log": "exact",
-            "exact": "exact",
         }
         return mapping.get(label.lower(), None)
 
@@ -157,9 +151,12 @@ class MeanRiskOptimizer:
         mapping = {
             "MV": "upperdev",
             "MSV": "uppersdev",
+            "MAD": "uppermad",
+            "GMD": "uppergmd",
+            "FLPM": "upperflpm",
+            "SLPM": "upperslpm",
+            "TG": "uppertg",
             "CVaR": "upperCVaR",
-            "CDaR": "upperCDaR",
-            "EVaR": "upperEVaR",
         }
         return mapping.get(rm_code)
 
@@ -277,7 +274,9 @@ class MeanRiskOptimizer:
         scenarios = returns.to_numpy()
         series = scenarios @ w_vec
         expected = float(mu.T @ w_vec)
-        risk_val = self._risk_value(rm_code, series, w_vec, cov, settings.alpha)
+        risk_val = self._risk_value(
+            rm_code, series, w_vec, cov, settings.alpha, risk_free, settings.a_sim
+        )
         sharpe = (expected - risk_free) / risk_val if risk_val != 0 else 0.0
         max_dd = float(rk.MDD_Abs(series))
         return OptimizerSummary(
@@ -297,17 +296,25 @@ class MeanRiskOptimizer:
         weights: np.ndarray,
         cov: np.ndarray,
         alpha: float,
+        risk_free: float,
+        a_sim: int,
     ) -> float:
         if rm_code == "MV":
             return float(np.sqrt(weights.T @ cov @ weights))
         if rm_code == "MSV":
             return float(rk.SemiDeviation(series))
+        if rm_code == "MAD":
+            return float(rk.MAD(series))
+        if rm_code == "GMD":
+            return float(rk.GMD(series))
+        if rm_code == "FLPM":
+            return float(rk.LPM(series, MAR=risk_free, p=1))
+        if rm_code == "SLPM":
+            return float(rk.LPM(series, MAR=risk_free, p=2))
+        if rm_code == "TG":
+            return float(rk.TG(series, alpha=alpha, a_sim=a_sim))
         if rm_code == "CVaR":
             return float(rk.CVaR_Hist(series, alpha))
-        if rm_code == "CDaR":
-            return float(rk.CDaR_Abs(series, alpha))
-        if rm_code == "EVaR":
-            return float(rk.EVaR_Hist(series, alpha)[0])
         return float(np.sqrt(weights.T @ cov @ weights))
 
     def _efficient_frontier(
@@ -343,7 +350,9 @@ class MeanRiskOptimizer:
             w = frontier[column].astype(float).to_numpy().reshape((-1, 1))
             series = scenarios @ w
             expected = float(mu.T @ w)
-            risk_val = self._risk_value(rm_code, series, w, cov, settings.alpha)
+            risk_val = self._risk_value(
+                rm_code, series, w, cov, settings.alpha, risk_free, settings.a_sim
+            )
             weights_dict = {asset: float(frontier.loc[asset, column]) for asset in frontier.index}
             data.append(
                 FrontierPoint(

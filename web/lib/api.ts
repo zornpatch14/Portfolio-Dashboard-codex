@@ -245,6 +245,7 @@ export type MeanRiskPayload = {
   risk_free_rate: number;
   risk_aversion: number;
   alpha: number;
+  a_sim: number;
   budget: number;
   bounds: {
     default_min: number;
@@ -254,8 +255,6 @@ export type MeanRiskPayload = {
   symbol_caps: { name: string; max_weight: number }[];
   strategy_caps: { name: string; max_weight: number }[];
   efficient_frontier_points: number;
-  max_risk?: number | null;
-  min_return?: number | null;
   turnover_limit?: number | null;
 };
 
