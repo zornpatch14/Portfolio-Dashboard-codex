@@ -110,6 +110,29 @@ export type MetricsResponse = {
   files: MetricsBlock[];
 };
 
+export type CtaMonthlyRow = {
+  month_start: string;
+  label: string;
+  total_pnl: number;
+  drawdown: number;
+  median_daily_pnl: number;
+  sharpe: number;
+};
+
+export type CtaSeriesPoint = {
+  timestamp: string;
+  value: number;
+};
+
+export type CtaResponse = {
+  selection: Selection;
+  monthly: CtaMonthlyRow[];
+  monthly_pnl: CtaSeriesPoint[];
+  monthly_return: CtaSeriesPoint[];
+  rolling_pnl: CtaSeriesPoint[];
+  rolling_return: CtaSeriesPoint[];
+};
+
 
 
 export type CorrelationResponse = {
@@ -342,6 +365,7 @@ const endpoint: Record<SeriesKind | 'metrics' | 'histogram', string> = {
   metrics: '/api/v1/metrics',
 
 };
+const ctaEndpoint = '/api/v1/cta';
 
 const riskfolioEndpoint = '/api/v1/optimizer/riskfolio';
 
@@ -509,6 +533,30 @@ export async function fetchHistogram(selection: Selection) {
 
 }
 
+
+export async function fetchCta(selection: Selection) {
+
+  const query = selectionQuery(selection);
+
+  const path = `${ctaEndpoint}?${query}`;
+
+  if (!API_BASE) {
+
+    throw new Error('NEXT_PUBLIC_API_BASE is not set; cannot load CTA data');
+
+  }
+
+  const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
+
+  if (!response.ok) {
+
+    raiseResponseError(response);
+
+  }
+
+  return (await response.json()) as CtaResponse;
+
+}
 
 
 export async function submitRiskfolioJob(selection: Selection, meanRisk: MeanRiskPayload) {
