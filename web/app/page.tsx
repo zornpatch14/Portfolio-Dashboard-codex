@@ -32,6 +32,9 @@ import {
   MeanRiskPayload,
   coerceNumber,
   SelectionMeta,
+  HistogramResponse,
+  MetricsResponse,
+  CtaResponse,
 } from '../lib/api';
 
 import { blankSelection, selectionForApi } from '../lib/selections';
@@ -84,6 +87,61 @@ const NO_DATA_MESSAGE = 'No data matches your selection.';
 const GENERIC_ERROR_MESSAGE = 'Failed to load data.';
 
 const STALE_TIME = Infinity;
+
+const MONTH_OPTIONS = [
+  { value: 0, label: 'January' },
+  { value: 1, label: 'February' },
+  { value: 2, label: 'March' },
+  { value: 3, label: 'April' },
+  { value: 4, label: 'May' },
+  { value: 5, label: 'June' },
+  { value: 6, label: 'July' },
+  { value: 7, label: 'August' },
+  { value: 8, label: 'September' },
+  { value: 9, label: 'October' },
+  { value: 10, label: 'November' },
+  { value: 11, label: 'December' },
+] as const;
+const MONTH_LABELS = MONTH_OPTIONS.map((month) => month.label);
+
+type MonthYear = {
+  month: number;
+  year: number;
+};
+
+const monthYearToKey = (value: MonthYear) => `${value.year}-${value.month}`;
+
+const formatMonthYear = (value: MonthYear) => `${MONTH_LABELS[value.month]} ${value.year}`;
+
+const compareMonthYear = (a: MonthYear, b: MonthYear) =>
+  a.year === b.year ? a.month - b.month : a.year - b.year;
+
+const addMonths = (value: MonthYear, offset: number): MonthYear => {
+  const date = new Date(Date.UTC(value.year, value.month + offset, 1));
+  return { year: date.getUTCFullYear(), month: date.getUTCMonth() };
+};
+
+const monthDiffInclusive = (start: MonthYear, end: MonthYear) =>
+  (end.year - start.year) * 12 + (end.month - start.month) + 1;
+
+const monthYearToDateString = (value: MonthYear, position: 'start' | 'end') => {
+  const year = value.year;
+  const month = value.month;
+  const day = position === 'start' ? 1 : new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const mm = String(month + 1).padStart(2, '0');
+  const dd = String(day).padStart(2, '0');
+  return `${year}-${mm}-${dd}`;
+};
+
+const parseMonthYearFromDate = (value?: string | null): MonthYear | null => {
+  if (!value) return null;
+  const [rawYear, rawMonth] = value.split('-');
+  const year = Number(rawYear);
+  const month = Number(rawMonth) - 1;
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
+  if (month < 0 || month > 11) return null;
+  return { year, month };
+};
 
 
 
@@ -197,6 +255,33 @@ type SelectionDefaults = Pick<
   | 'start'
   | 'end'
 >;
+
+type WalkForwardPlanStep = {
+  index: number;
+  inSampleStart: MonthYear;
+  inSampleEnd: MonthYear;
+  outSampleStart: MonthYear;
+  outSampleEnd: MonthYear;
+};
+
+type WalkForwardResultStep = {
+  id: string;
+  index: number;
+  inSampleStart: string;
+  inSampleEnd: string;
+  outSampleStart: string;
+  outSampleEnd: string;
+  weights: Record<string, number>;
+  allocationMargins: Record<string, number>;
+};
+
+type WalkForwardAppliedStep = {
+  id: string;
+  outSampleStart: string;
+  outSampleEnd: string;
+  contracts: Record<string, number>;
+  margins: Record<string, number>;
+};
 
 const deriveSelectionDefaults = (meta: SelectionMeta, prev: Selection): SelectionDefaults => {
   const files = meta.files.map((file) => file.file_id);
@@ -372,6 +457,21 @@ export default function HomePage() {
   const [optimizerLoading, setOptimizerLoading] = useState(false);
   const [optimizerError, setOptimizerError] = useState<string | null>(null);
   const [riskfolioApplyMessage, setRiskfolioApplyMessage] = useState<string | null>(null);
+  const [walkForwardStartMonth, setWalkForwardStartMonth] = useState(0);
+  const [walkForwardStartYear, setWalkForwardStartYear] = useState(new Date().getFullYear());
+  const [walkForwardInSampleEndMonth, setWalkForwardInSampleEndMonth] = useState(11);
+  const [walkForwardInSampleEndYear, setWalkForwardInSampleEndYear] = useState(new Date().getFullYear());
+  const [walkForwardOutSampleEndMonth, setWalkForwardOutSampleEndMonth] = useState(11);
+  const [walkForwardOutSampleEndYear, setWalkForwardOutSampleEndYear] = useState(new Date().getFullYear());
+  const [walkForwardResults, setWalkForwardResults] = useState<WalkForwardResultStep[]>([]);
+  const [walkForwardRunning, setWalkForwardRunning] = useState(false);
+  const [walkForwardProgress, setWalkForwardProgress] = useState(0);
+  const [walkForwardError, setWalkForwardError] = useState<string | null>(null);
+  const [walkForwardApplyMessage, setWalkForwardApplyMessage] = useState<string | null>(null);
+  const [walkForwardAppliedSteps, setWalkForwardAppliedSteps] = useState<WalkForwardAppliedStep[] | null>(null);
+  const [walkForwardInitialized, setWalkForwardInitialized] = useState(false);
+  const [loadTradeListMode, setLoadTradeListMode] = useState<'standard' | 'walk-forward'>('standard');
+  const walkForwardAbortRef = useRef({ cancelled: false });
 
   const usesRiskFreeRate =
     meanRiskObjective === 'Sharpe' || meanRiskRiskMeasure === 'FLPM' || meanRiskRiskMeasure === 'SLPM';
@@ -400,6 +500,7 @@ export default function HomePage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const accountEquity = activeSelection.accountEquity ?? selectionMeta?.account_equity ?? ACCOUNT_EQUITY_FALLBACK;
   const [riskfolioContractEquity, setRiskfolioContractEquity] = useState(accountEquity);
+  const [walkForwardContractEquity, setWalkForwardContractEquity] = useState(accountEquity);
   const [selectedFrontierIdx, setSelectedFrontierIdx] = useState<number | null>(null);
   const [metricsRequested, setMetricsRequested] = useState(false);
 
@@ -1215,6 +1316,30 @@ export default function HomePage() {
     setMetricsRequested(false);
   }, [selectionKey]);
 
+  useEffect(() => {
+    if (walkForwardInitialized) return;
+    const startCandidate = parseMonthYearFromDate(activeSelection.start ?? selectionMeta?.date_min);
+    const endCandidate = parseMonthYearFromDate(activeSelection.end ?? selectionMeta?.date_max);
+    if (!startCandidate || !endCandidate) return;
+    setWalkForwardStartMonth(startCandidate.month);
+    setWalkForwardStartYear(startCandidate.year);
+    setWalkForwardInSampleEndMonth(endCandidate.month);
+    setWalkForwardInSampleEndYear(endCandidate.year);
+    setWalkForwardOutSampleEndMonth(endCandidate.month);
+    setWalkForwardOutSampleEndYear(endCandidate.year);
+    setWalkForwardInitialized(true);
+  }, [
+    activeSelection.end,
+    activeSelection.start,
+    selectionMeta?.date_max,
+    selectionMeta?.date_min,
+    walkForwardInitialized,
+  ]);
+
+  useEffect(() => {
+    setWalkForwardApplyMessage(null);
+  }, [walkForwardResults, walkForwardContractEquity]);
+
   const handleOverrideChange = useCallback((fileId: string, field: 'min' | 'max', value: string) => {
     const sanitizedValue = sanitizeWeightInputString(value);
     setMeanRiskOverrides((prev) => {
@@ -1234,6 +1359,61 @@ export default function HomePage() {
       return next;
     });
   }, []);
+
+  const buildMeanRiskPayload = useCallback((): MeanRiskPayload => {
+    const boundsOverrides = Object.entries(meanRiskOverrides).reduce(
+      (acc, [asset, bounds]) => {
+        const minVal = parseOptionalWeightInputValue(bounds.min ?? null);
+        const maxVal = parseOptionalWeightInputValue(bounds.max ?? null);
+        if (minVal === null && maxVal === null) {
+          return acc;
+        }
+        acc[asset] = [minVal, maxVal];
+        return acc;
+      },
+      {} as Record<string, [number | null, number | null]>,
+    );
+    return {
+      objective: meanRiskObjective,
+      risk_measure: meanRiskRiskMeasure,
+      return_model: meanRiskReturnModel,
+      method_mu: meanRiskReturnEstimate,
+      method_cov: meanRiskCovariance,
+      solver: null,
+      risk_free_rate: meanRiskRiskFree / 100,
+      risk_aversion: meanRiskRiskAversion,
+      alpha: meanRiskAlpha,
+      a_sim: meanRiskASim,
+      budget: meanRiskBudget,
+      bounds: {
+        default_min: minWeightBound,
+        default_max: maxWeightBound,
+        overrides: boundsOverrides,
+      },
+      symbol_caps: parseCapsInput(meanRiskSymbolCaps),
+      strategy_caps: parseCapsInput(meanRiskStrategyCaps),
+      efficient_frontier_points: meanRiskFrontierPoints,
+      turnover_limit: parseOptionalNumber(meanRiskTurnover),
+    };
+  }, [
+    meanRiskOverrides,
+    meanRiskObjective,
+    meanRiskRiskMeasure,
+    meanRiskReturnModel,
+    meanRiskReturnEstimate,
+    meanRiskCovariance,
+    meanRiskRiskFree,
+    meanRiskRiskAversion,
+    meanRiskAlpha,
+    meanRiskASim,
+    meanRiskBudget,
+    minWeightBound,
+    maxWeightBound,
+    meanRiskSymbolCaps,
+    meanRiskStrategyCaps,
+    meanRiskFrontierPoints,
+    meanRiskTurnover,
+  ]);
 
   const handleApplyRiskfolioContracts = useCallback(() => {
     if (!riskfolioContracts.rows.length) {
@@ -1282,41 +1462,7 @@ export default function HomePage() {
     setOptimizerJobId(null);
     setOptimizerLoading(true);
     try {
-      const boundsOverrides = Object.entries(meanRiskOverrides).reduce(
-        (acc, [asset, bounds]) => {
-          const minVal = parseOptionalWeightInputValue(bounds.min ?? null);
-          const maxVal = parseOptionalWeightInputValue(bounds.max ?? null);
-          if (minVal === null && maxVal === null) {
-            return acc;
-          }
-          acc[asset] = [minVal, maxVal];
-          return acc;
-        },
-        {} as Record<string, [number | null, number | null]>,
-      );
-      const payload: MeanRiskPayload = {
-        objective: meanRiskObjective,
-        risk_measure: meanRiskRiskMeasure,
-        return_model: meanRiskReturnModel,
-        method_mu: meanRiskReturnEstimate,
-        method_cov: meanRiskCovariance,
-        solver: null,
-        risk_free_rate: meanRiskRiskFree / 100,
-        risk_aversion: meanRiskRiskAversion,
-        alpha: meanRiskAlpha,
-        a_sim: meanRiskASim,
-        budget: meanRiskBudget,
-        bounds: {
-          default_min: minWeightBound,
-          default_max: maxWeightBound,
-          overrides: boundsOverrides,
-        },
-        symbol_caps: parseCapsInput(meanRiskSymbolCaps),
-        strategy_caps: parseCapsInput(meanRiskStrategyCaps),
-        efficient_frontier_points: meanRiskFrontierPoints,
-        turnover_limit: parseOptionalNumber(meanRiskTurnover),
-      };
-      const response = await submitRiskfolioJob(selectionForFetch, payload);
+      const response = await submitRiskfolioJob(selectionForFetch, buildMeanRiskPayload());
       setOptimizerJobId(response.job_id);
     } catch (error) {
       setOptimizerError(error instanceof Error ? error.message : 'Failed to run optimizer');
@@ -1326,176 +1472,876 @@ export default function HomePage() {
   }, [
     filteredFileIds.length,
     selectionForFetch,
-    meanRiskObjective,
-    meanRiskRiskMeasure,
-    meanRiskReturnModel,
-    meanRiskReturnEstimate,
-    meanRiskCovariance,
-    meanRiskRiskFree,
-    meanRiskRiskAversion,
-    meanRiskAlpha,
-    meanRiskASim,
-    meanRiskBudget,
-    minWeightBound,
-    maxWeightBound,
-    meanRiskSymbolCaps,
-    meanRiskStrategyCaps,
-    meanRiskTurnover,
-    meanRiskFrontierPoints,
-    meanRiskOverrides,
+    buildMeanRiskPayload,
   ]);
+
+  const walkForwardConfig = useMemo(
+    () => ({
+      start: { year: walkForwardStartYear, month: walkForwardStartMonth },
+      inSampleEnd: { year: walkForwardInSampleEndYear, month: walkForwardInSampleEndMonth },
+      outSampleEnd: { year: walkForwardOutSampleEndYear, month: walkForwardOutSampleEndMonth },
+    }),
+    [
+      walkForwardInSampleEndMonth,
+      walkForwardInSampleEndYear,
+      walkForwardOutSampleEndMonth,
+      walkForwardOutSampleEndYear,
+      walkForwardStartMonth,
+      walkForwardStartYear,
+    ],
+  );
+
+  const walkForwardDataEnd = useMemo(
+    () => parseMonthYearFromDate(activeSelection.end ?? selectionMeta?.date_max),
+    [activeSelection.end, selectionMeta?.date_max],
+  );
+
+  const walkForwardInSampleMonths = useMemo(
+    () => monthDiffInclusive(walkForwardConfig.start, walkForwardConfig.inSampleEnd),
+    [walkForwardConfig],
+  );
+
+  const walkForwardOutSampleStart = useMemo(
+    () => addMonths(walkForwardConfig.inSampleEnd, 1),
+    [walkForwardConfig],
+  );
+
+  const walkForwardOutSampleMonths = useMemo(
+    () => monthDiffInclusive(walkForwardOutSampleStart, walkForwardConfig.outSampleEnd),
+    [walkForwardConfig, walkForwardOutSampleStart],
+  );
+
+  const walkForwardPlan = useMemo(() => {
+    if (walkForwardInSampleMonths <= 0) {
+      return { steps: [] as WalkForwardPlanStep[], error: 'In-sample end must be after start month.' };
+    }
+    if (walkForwardOutSampleMonths <= 0) {
+      return { steps: [] as WalkForwardPlanStep[], error: 'Out-of-sample end must be after in-sample end.' };
+    }
+    if (walkForwardDataEnd && compareMonthYear(walkForwardConfig.outSampleEnd, walkForwardDataEnd) > 0) {
+      return {
+        steps: [] as WalkForwardPlanStep[],
+        error: `Out-of-sample end exceeds available data (${formatMonthYear(walkForwardDataEnd)}).`,
+      };
+    }
+
+    const steps: WalkForwardPlanStep[] = [];
+    const maxMonth = walkForwardDataEnd ?? walkForwardConfig.outSampleEnd;
+    let inSampleStart = walkForwardConfig.start;
+    let inSampleEnd = addMonths(inSampleStart, walkForwardInSampleMonths - 1);
+    let outSampleStart = addMonths(inSampleEnd, 1);
+    let outSampleEnd = addMonths(outSampleStart, walkForwardOutSampleMonths - 1);
+
+    let guard = 0;
+    while (guard < 500 && compareMonthYear(outSampleEnd, maxMonth) <= 0) {
+      steps.push({
+        index: steps.length + 1,
+        inSampleStart,
+        inSampleEnd,
+        outSampleStart,
+        outSampleEnd,
+      });
+      inSampleStart = addMonths(inSampleStart, walkForwardOutSampleMonths);
+      inSampleEnd = addMonths(inSampleStart, walkForwardInSampleMonths - 1);
+      outSampleStart = addMonths(inSampleEnd, 1);
+      outSampleEnd = addMonths(outSampleStart, walkForwardOutSampleMonths - 1);
+      guard += 1;
+    }
+
+    return { steps, error: null as string | null };
+  }, [
+    walkForwardConfig,
+    walkForwardDataEnd,
+    walkForwardInSampleMonths,
+    walkForwardOutSampleMonths,
+  ]);
+
+  const formatWalkForwardRange = useCallback((start: MonthYear, end: MonthYear) => {
+    if (monthYearToKey(start) === monthYearToKey(end)) {
+      return formatMonthYear(start);
+    }
+    return `${formatMonthYear(start)} → ${formatMonthYear(end)}`;
+  }, []);
+
+  const formatWalkForwardRangeFromDate = useCallback(
+    (start: string, end: string) => {
+      const startMonth = parseMonthYearFromDate(start);
+      const endMonth = parseMonthYearFromDate(end);
+      if (!startMonth || !endMonth) {
+        return `${start} → ${end}`;
+      }
+      return formatWalkForwardRange(startMonth, endMonth);
+    },
+    [formatWalkForwardRange],
+  );
+
+  const pollWalkForwardJob = useCallback(async (jobId: string) => {
+    while (!walkForwardAbortRef.current.cancelled) {
+      const status = await fetchJobStatus(jobId);
+      if (status.status === 'completed') {
+        return status;
+      }
+      if (status.status === 'failed') {
+        throw new Error(status.error || 'Walk forward optimizer job failed.');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    throw new Error('Walk forward optimizer cancelled.');
+  }, []);
+
+  const handleRunWalkForward = useCallback(async () => {
+    if (!walkForwardPlan.steps.length) {
+      setWalkForwardError(walkForwardPlan.error ?? 'Define a valid walk forward window before running.');
+      return;
+    }
+    if (!filteredFileIds.length) {
+      setWalkForwardError('Select at least one file before running walk forward.');
+      return;
+    }
+    walkForwardAbortRef.current.cancelled = false;
+    setWalkForwardError(null);
+    setWalkForwardRunning(true);
+    setWalkForwardProgress(0);
+    setWalkForwardResults([]);
+    setWalkForwardAppliedSteps(null);
+    setLoadTradeListMode('standard');
+    try {
+      const payload = buildMeanRiskPayload();
+      const results: WalkForwardResultStep[] = [];
+      for (let idx = 0; idx < walkForwardPlan.steps.length; idx += 1) {
+        const step = walkForwardPlan.steps[idx];
+        const inSampleStart = monthYearToDateString(step.inSampleStart, 'start');
+        const inSampleEnd = monthYearToDateString(step.inSampleEnd, 'end');
+        const outSampleStart = monthYearToDateString(step.outSampleStart, 'start');
+        const outSampleEnd = monthYearToDateString(step.outSampleEnd, 'end');
+        const selection = {
+          ...selectionForFetch,
+          start: inSampleStart,
+          end: inSampleEnd,
+        };
+        const response = await submitRiskfolioJob(selection, payload);
+        const status = await pollWalkForwardJob(response.job_id);
+        const weights: Record<string, number> = {};
+        const allocationMargins: Record<string, number> = {};
+        (status.result?.weights ?? []).forEach((row) => {
+          weights[row.asset] = coerceNumber(row.weight, 0);
+          if (row.margin_per_contract !== undefined && row.margin_per_contract !== null) {
+            allocationMargins[row.asset] = coerceNumber(row.margin_per_contract, 0);
+          }
+        });
+        results.push({
+          id: `${idx}-${response.job_id}`,
+          index: idx + 1,
+          inSampleStart,
+          inSampleEnd,
+          outSampleStart,
+          outSampleEnd,
+          weights,
+          allocationMargins,
+        });
+        setWalkForwardProgress(Math.round(((idx + 1) / walkForwardPlan.steps.length) * 100));
+        if (walkForwardAbortRef.current.cancelled) {
+          break;
+        }
+      }
+      setWalkForwardResults(results);
+    } catch (error) {
+      setWalkForwardError(error instanceof Error ? error.message : 'Failed to run walk forward.');
+    } finally {
+      setWalkForwardRunning(false);
+    }
+  }, [
+    buildMeanRiskPayload,
+    filteredFileIds.length,
+    pollWalkForwardJob,
+    selectionForFetch,
+    walkForwardPlan,
+  ]);
+
+  const handleCancelWalkForward = useCallback(() => {
+    walkForwardAbortRef.current.cancelled = true;
+    setWalkForwardRunning(false);
+  }, []);
+
+  const walkForwardAssets = useMemo(() => {
+    if (availableFiles.length) return availableFiles;
+    if (activeSelection.files.length) return activeSelection.files;
+    return filteredFileIds;
+  }, [activeSelection.files, availableFiles, filteredFileIds]);
+
+  const walkForwardContracts = useMemo(() => {
+    const equity = Math.max(0, coerceNumber(walkForwardContractEquity, 0));
+    const marginMap = activeSelection.marginOverrides ?? activeSelection.margins ?? {};
+    return walkForwardResults.map((step) => {
+      const contracts: Record<string, number> = {};
+      const weights: Record<string, number> = {};
+      walkForwardAssets.forEach((asset) => {
+        const weight = coerceNumber(step.weights[asset], 0);
+        const marginValue =
+          (marginMap && Object.prototype.hasOwnProperty.call(marginMap, asset) ? marginMap[asset] : undefined) ??
+          step.allocationMargins[asset];
+        const marginPerContract = coerceNumber(marginValue, 0);
+        const allocationNotional = weight * equity;
+        const suggestedContracts =
+          marginPerContract > 0 ? Math.max(0, Math.floor(allocationNotional / marginPerContract)) : 0;
+        contracts[asset] = suggestedContracts;
+        weights[asset] = weight;
+      });
+      return {
+        ...step,
+        contracts,
+        weights,
+      };
+    });
+  }, [activeSelection.marginOverrides, activeSelection.margins, walkForwardAssets, walkForwardContractEquity, walkForwardResults]);
+
+  const handleApplyWalkForwardContracts = useCallback(() => {
+    if (!walkForwardContracts.length) {
+      setWalkForwardApplyMessage('Run walk forward to generate contracts.');
+      return;
+    }
+    const baseContracts = activeSelection.contractMultipliers ?? activeSelection.contracts ?? {};
+    const baseMargins = activeSelection.marginOverrides ?? activeSelection.margins ?? {};
+    const applied = walkForwardContracts.map((step) => {
+      const contracts = walkForwardAssets.reduce<Record<string, number>>((acc, asset) => {
+        acc[asset] = step.contracts[asset] ?? 0;
+        return acc;
+      }, { ...baseContracts });
+      const margins = { ...baseMargins };
+      return {
+        id: step.id,
+        outSampleStart: step.outSampleStart,
+        outSampleEnd: step.outSampleEnd,
+        contracts,
+        margins,
+      };
+    });
+    setWalkForwardAppliedSteps(applied);
+    setWalkForwardApplyMessage(
+      `Applied walk forward contracts to ${walkForwardContracts.length} out-of-sample period${
+        walkForwardContracts.length === 1 ? '' : 's'
+      }.`,
+    );
+    setLoadTradeListMode('walk-forward');
+  }, [activeSelection.contractMultipliers, activeSelection.contracts, activeSelection.marginOverrides, activeSelection.margins, walkForwardContracts]);
+
+  const handleWalkForwardContractChange = useCallback(
+    (stepId: string, asset: string, value: number) => {
+      setWalkForwardAppliedSteps((prev) => {
+        if (!prev) return prev;
+        const next = prev.map((step) => {
+          if (step.id !== stepId) return step;
+          return {
+            ...step,
+            contracts: {
+              ...step.contracts,
+              [asset]: value,
+            },
+          };
+        });
+        return next;
+      });
+    },
+    [],
+  );
+
+  const handleWalkForwardMarginChange = useCallback(
+    (stepId: string, asset: string, value: number) => {
+      setWalkForwardAppliedSteps((prev) => {
+        if (!prev) return prev;
+        const next = prev.map((step) => {
+          if (step.id !== stepId) return step;
+          return {
+            ...step,
+            margins: {
+              ...step.margins,
+              [asset]: value,
+            },
+          };
+        });
+        return next;
+      });
+    },
+    [],
+  );
+
+  const walkForwardActive = loadTradeListMode === 'walk-forward' && Boolean(walkForwardAppliedSteps?.length);
+  const walkForwardSelectionKey = useMemo(
+    () => JSON.stringify({ selectionKey, walkForwardAppliedSteps }),
+    [selectionKey, walkForwardAppliedSteps],
+  );
+
+  const walkForwardFilesForStep = useCallback((step: WalkForwardAppliedStep) => {
+    return Object.entries(step.contracts)
+      .filter(([, value]) => coerceNumber(value, 0) > 0)
+      .map(([fileId]) => fileId)
+      .sort();
+  }, []);
+
+  const buildWalkForwardSelection = useCallback(
+    (step: WalkForwardAppliedStep, options?: { accountEquity?: number | null }) => ({
+      ...selectionForFetch,
+      files: walkForwardFilesForStep(step),
+      start: step.outSampleStart,
+      end: step.outSampleEnd,
+      contracts: step.contracts,
+      contractMultipliers: step.contracts,
+      margins: step.margins,
+      marginOverrides: step.margins,
+      accountEquity:
+        options?.accountEquity !== undefined ? options.accountEquity : selectionForFetch.accountEquity ?? null,
+    }),
+    [selectionForFetch, walkForwardFilesForStep],
+  );
+
+  const buildWalkForwardSeriesSelection = useCallback(
+    (step: WalkForwardAppliedStep) => buildWalkForwardSelection(step, { accountEquity: 0 }),
+    [buildWalkForwardSelection],
+  );
+
+  const mergeSeriesResponses = useCallback(
+    (responses: SeriesResponse[], series: string, options?: { offsetValues?: boolean }) => {
+      if (!responses.length) {
+        return {
+          series,
+          selection: selectionForFetch,
+          portfolio: [],
+          perFile: [],
+        } as SeriesResponse;
+      }
+      const portfolio: SeriesResponse['portfolio'] = [];
+      const perFileMap = new Map<string, SeriesResponse['perFile'][number]>();
+      let rawCount = 0;
+      let downsampledCount = 0;
+      let downsampled = false;
+      let portfolioOffset = 0;
+      const perFileOffsets = new Map<string, number>();
+      const sortPoints = (points: { timestamp: string; value: number }[]) =>
+        [...points].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+      responses.forEach((response) => {
+        rawCount += response.raw_count ?? response.portfolio.length ?? 0;
+        downsampledCount += response.downsampled_count ?? response.portfolio.length ?? 0;
+        if (response.downsampled) downsampled = true;
+        const sortedPortfolio = sortPoints(response.portfolio);
+        const portfolioBase =
+          options?.offsetValues && sortedPortfolio.length ? sortedPortfolio[0].value : 0;
+        const adjustedPortfolio = options?.offsetValues
+          ? sortedPortfolio.map((point) => ({
+              ...point,
+              value: point.value - portfolioBase + portfolioOffset,
+            }))
+          : sortedPortfolio;
+        if (options?.offsetValues && adjustedPortfolio.length) {
+          portfolioOffset = adjustedPortfolio[adjustedPortfolio.length - 1].value;
+        }
+        portfolio.push(...adjustedPortfolio);
+        response.perFile.forEach((line) => {
+          const key = line.contributor_id || line.label;
+          const existing = perFileMap.get(key);
+          const sortedPoints = sortPoints(line.points);
+          const lineBase =
+            options?.offsetValues && sortedPoints.length ? sortedPoints[0].value : 0;
+          const offset = perFileOffsets.get(key) ?? 0;
+          const adjustedPoints = options?.offsetValues
+            ? sortedPoints.map((point) => ({
+                ...point,
+                value: point.value - lineBase + offset,
+              }))
+            : sortedPoints;
+          if (options?.offsetValues && adjustedPoints.length) {
+            perFileOffsets.set(key, adjustedPoints[adjustedPoints.length - 1].value);
+          }
+          if (existing) {
+            existing.points.push(...adjustedPoints);
+          } else {
+            perFileMap.set(key, { ...line, points: [...adjustedPoints] });
+          }
+        });
+      });
+      const mergedPerFile = Array.from(perFileMap.values()).map((line) => ({
+        ...line,
+        points: sortPoints(line.points),
+      }));
+      return {
+        series: responses[0].series ?? series,
+        selection: selectionForFetch,
+        downsampled,
+        raw_count: rawCount,
+        downsampled_count: downsampledCount,
+        portfolio: sortPoints(portfolio),
+        perFile: mergedPerFile,
+      };
+    },
+    [selectionForFetch],
+  );
+
+  const mergeHistogramResponses = useCallback((responses: HistogramResponse[]) => {
+    if (!responses.length) {
+      return { label: 'Portfolio Histogram', buckets: [] };
+    }
+    const bucketMap = new Map<string, HistogramResponse['buckets'][number]>();
+    responses.forEach((response) => {
+      response.buckets.forEach((bucket) => {
+        const key = `${bucket.start_value}-${bucket.end_value}`;
+        const existing = bucketMap.get(key);
+        if (existing) {
+          existing.count += bucket.count;
+        } else {
+          bucketMap.set(key, { ...bucket });
+        }
+      });
+    });
+    const buckets = Array.from(bucketMap.values()).sort((a, b) => a.start_value - b.start_value);
+    return {
+      label: responses[0].label ?? 'Portfolio Histogram',
+      buckets,
+    };
+  }, []);
+
+  const aggregateMetrics = useCallback((metricsList: Record<string, number | string | null>[]) => {
+    const totals = {
+      total_net_profit: 0,
+      gross_profit: 0,
+      gross_loss: 0,
+      total_trades: 0,
+      winning_trades: 0,
+      losing_trades: 0,
+      total_contracts_held: 0,
+      total_commission: 0,
+      total_slippage: 0,
+    };
+    let maxContractsHeld: number | null = null;
+    let accountSizeRequired: number | null = null;
+    let largestWinningTrade: number | null = null;
+    let largestLosingTrade: number | null = null;
+    let maxConsecutiveWins: number | null = null;
+    let maxConsecutiveLosses: number | null = null;
+    let closeDrawdownValue: number | null = null;
+    let closeDrawdownDate: string | null = null;
+    let intradayDrawdownValue: number | null = null;
+    let intradayDrawdownDate: string | null = null;
+    let maxTradeDrawdown: number | null = null;
+
+    metricsList.forEach((metrics) => {
+      totals.total_net_profit += coerceNumber(metrics.total_net_profit, 0);
+      totals.gross_profit += coerceNumber(metrics.gross_profit, 0);
+      totals.gross_loss += coerceNumber(metrics.gross_loss, 0);
+      totals.total_trades += coerceNumber(metrics.total_trades, 0);
+      totals.winning_trades += coerceNumber(metrics.winning_trades, 0);
+      totals.losing_trades += coerceNumber(metrics.losing_trades, 0);
+      totals.total_contracts_held += coerceNumber(metrics.total_contracts_held, 0);
+      totals.total_commission += coerceNumber(metrics.total_commission, 0);
+      totals.total_slippage += coerceNumber(metrics.total_slippage, 0);
+
+      const maxContracts = coerceNumber(metrics.max_contracts_held, 0);
+      if (maxContractsHeld === null || maxContracts > maxContractsHeld) {
+        maxContractsHeld = maxContracts;
+      }
+
+      const accountSize = coerceNumber(metrics.account_size_required, 0);
+      if (accountSizeRequired === null || accountSize > accountSizeRequired) {
+        accountSizeRequired = accountSize;
+      }
+
+      const largestWin = coerceNumber(metrics.largest_winning_trade, 0);
+      if (largestWinningTrade === null || largestWin > largestWinningTrade) {
+        largestWinningTrade = largestWin;
+      }
+
+      const largestLoss = coerceNumber(metrics.largest_losing_trade, 0);
+      if (largestLosingTrade === null || largestLoss < largestLosingTrade) {
+        largestLosingTrade = largestLoss;
+      }
+
+      const consecutiveWins = coerceNumber(metrics.max_consecutive_wins, 0);
+      if (maxConsecutiveWins === null || consecutiveWins > maxConsecutiveWins) {
+        maxConsecutiveWins = consecutiveWins;
+      }
+
+      const consecutiveLosses = coerceNumber(metrics.max_consecutive_losses, 0);
+      if (maxConsecutiveLosses === null || consecutiveLosses > maxConsecutiveLosses) {
+        maxConsecutiveLosses = consecutiveLosses;
+      }
+
+      const closeValue = coerceNumber(metrics.close_to_close_drawdown_value, 0);
+      if (closeDrawdownValue === null || closeValue < closeDrawdownValue) {
+        closeDrawdownValue = closeValue;
+        closeDrawdownDate = typeof metrics.close_to_close_drawdown_date === 'string' ? metrics.close_to_close_drawdown_date : null;
+      }
+
+      const intradayValue = coerceNumber(metrics.intraday_peak_to_valley_drawdown_value, 0);
+      if (intradayDrawdownValue === null || intradayValue < intradayDrawdownValue) {
+        intradayDrawdownValue = intradayValue;
+        intradayDrawdownDate =
+          typeof metrics.intraday_peak_to_valley_drawdown_date === 'string'
+            ? metrics.intraday_peak_to_valley_drawdown_date
+            : null;
+      }
+
+      const tradeDrawdown = coerceNumber(metrics.max_trade_drawdown, 0);
+      if (maxTradeDrawdown === null || tradeDrawdown < maxTradeDrawdown) {
+        maxTradeDrawdown = tradeDrawdown;
+      }
+    });
+
+    const totalTrades = totals.total_trades;
+    const winningTrades = totals.winning_trades;
+    const losingTrades = totals.losing_trades;
+    const grossLoss = totals.gross_loss;
+    const grossProfit = totals.gross_profit;
+    const avgTrade = totalTrades ? totals.total_net_profit / totalTrades : 0;
+    const avgWin = winningTrades ? grossProfit / winningTrades : 0;
+    const avgLoss = losingTrades ? grossLoss / losingTrades : 0;
+    const percentProfitable = totalTrades ? (winningTrades / totalTrades) * 100 : 0;
+    const profitFactor =
+      grossLoss < 0 ? grossProfit / Math.abs(grossLoss || 1) : grossProfit > 0 ? Number.POSITIVE_INFINITY : 0;
+    const ratioAvgWinLoss =
+      losingTrades && avgLoss ? avgWin / Math.abs(avgLoss) : Number.NaN;
+
+    return {
+      total_net_profit: totals.total_net_profit,
+      gross_profit: grossProfit,
+      gross_loss: grossLoss,
+      profit_factor: profitFactor,
+      total_trades: totalTrades,
+      percent_profitable: percentProfitable,
+      winning_trades: winningTrades,
+      losing_trades: losingTrades,
+      avg_trade_net_profit: avgTrade,
+      avg_winning_trade: avgWin,
+      avg_losing_trade: avgLoss,
+      ratio_avg_win_loss: ratioAvgWinLoss,
+      largest_winning_trade: largestWinningTrade ?? 0,
+      largest_losing_trade: largestLosingTrade ?? 0,
+      max_consecutive_wins: maxConsecutiveWins ?? 0,
+      max_consecutive_losses: maxConsecutiveLosses ?? 0,
+      max_contracts_held: maxContractsHeld ?? 0,
+      total_contracts_held: totals.total_contracts_held,
+      account_size_required: accountSizeRequired ?? 0,
+      total_commission: totals.total_commission,
+      total_slippage: totals.total_slippage,
+      close_to_close_drawdown_value: closeDrawdownValue ?? 0,
+      close_to_close_drawdown_date: closeDrawdownDate,
+      max_trade_drawdown: maxTradeDrawdown ?? 0,
+      intraday_peak_to_valley_drawdown_value: intradayDrawdownValue ?? 0,
+      intraday_peak_to_valley_drawdown_date: intradayDrawdownDate,
+    } as Record<string, number | string | null>;
+  }, []);
+
+  const mergeMetricsResponses = useCallback(
+    (responses: MetricsResponse[]) => {
+      if (!responses.length) {
+        return { selection: selectionForFetch, portfolio: { key: 'portfolio', label: 'Portfolio', metrics: {} }, files: [] };
+      }
+      const blockMap = new Map<string, MetricsResponse['portfolio']>();
+      const metricsByKey = new Map<string, Record<string, number | string | null>[]>();
+
+      const addMetrics = (key: string, block: MetricsResponse['portfolio']) => {
+        if (!metricsByKey.has(key)) {
+          metricsByKey.set(key, []);
+        }
+        metricsByKey.get(key)?.push(block.metrics);
+        blockMap.set(key, block);
+      };
+
+      responses.forEach((response) => {
+        addMetrics('portfolio', response.portfolio);
+        response.files.forEach((file) => {
+          const key = file.fileId ?? file.key ?? file.label;
+          addMetrics(key, file);
+        });
+      });
+
+      const portfolioMetrics = aggregateMetrics(metricsByKey.get('portfolio') ?? []);
+      const portfolioBlock = {
+        key: 'portfolio',
+        label: 'Portfolio',
+        metrics: portfolioMetrics,
+      };
+
+      const files = Array.from(metricsByKey.entries())
+        .filter(([key]) => key !== 'portfolio')
+        .map(([key, metricsList]) => {
+          const base = blockMap.get(key);
+          return {
+            key: base?.key ?? key,
+            label: base?.label ?? key,
+            fileId: base?.fileId ?? key,
+            metrics: aggregateMetrics(metricsList),
+          };
+        });
+
+      return {
+        selection: selectionForFetch,
+        portfolio: portfolioBlock,
+        files,
+      };
+    },
+    [aggregateMetrics, selectionForFetch],
+  );
+
+  const mergeCtaResponses = useCallback((responses: CtaResponse[]) => {
+    if (!responses.length) {
+      return {
+        selection: selectionForFetch,
+        monthly: [],
+        monthly_pnl: [],
+        monthly_return: [],
+        rolling_pnl: [],
+        rolling_return: [],
+      };
+    }
+    const concatAndSort = <T extends { timestamp?: string; month_start?: string }>(items: T[]) =>
+      [...items].sort((a, b) => {
+        const aKey = a.timestamp ?? a.month_start ?? '';
+        const bKey = b.timestamp ?? b.month_start ?? '';
+        return aKey.localeCompare(bKey);
+      });
+
+    return {
+      selection: selectionForFetch,
+      monthly: concatAndSort(responses.flatMap((response) => response.monthly)),
+      monthly_pnl: concatAndSort(responses.flatMap((response) => response.monthly_pnl)),
+      monthly_return: concatAndSort(responses.flatMap((response) => response.monthly_return)),
+      rolling_pnl: concatAndSort(responses.flatMap((response) => response.rolling_pnl)),
+      rolling_return: concatAndSort(responses.flatMap((response) => response.rolling_return)),
+    };
+  }, [selectionForFetch]);
+
+  const fetchEquityWalkForward = useCallback(
+    async (opts?: Parameters<typeof fetchSeries>[2]) => {
+      const steps = walkForwardAppliedSteps ?? [];
+      const responses = await Promise.all(
+        steps.map((step) => fetchSeries(buildWalkForwardSeriesSelection(step), 'equity', opts)),
+      );
+      return mergeSeriesResponses(responses, 'equity', { offsetValues: true });
+    },
+    [buildWalkForwardSeriesSelection, mergeSeriesResponses, walkForwardAppliedSteps],
+  );
+
+  const computeDrawdownSeries = useCallback((equityResponse: SeriesResponse) => {
+    const computeDrawdown = (points: { timestamp: string; value: number }[]) => {
+      let peak = Number.NEGATIVE_INFINITY;
+      return points.map((point) => {
+        if (point.value > peak) peak = point.value;
+        return { ...point, value: point.value - peak };
+      });
+    };
+    return {
+      ...equityResponse,
+      series: 'drawdown',
+      portfolio: computeDrawdown(equityResponse.portfolio),
+      perFile: equityResponse.perFile.map((line) => ({
+        ...line,
+        points: computeDrawdown(line.points),
+      })),
+    } as SeriesResponse;
+  }, []);
+
+  const computeEquityPercentSeries = useCallback(
+    (equityResponse: SeriesResponse) => {
+      const baseEquity = Math.max(1, accountEquity || 1);
+      const toPercent = (points: { timestamp: string; value: number }[]) =>
+        points.map((point) => ({ ...point, value: (point.value / baseEquity) * 100 }));
+      return {
+        ...equityResponse,
+        series: 'equityPercent',
+        portfolio: toPercent(equityResponse.portfolio),
+        perFile: equityResponse.perFile.map((line) => ({
+          ...line,
+          points: toPercent(line.points),
+        })),
+      } as SeriesResponse;
+    },
+    [accountEquity],
+  );
+
+  const fetchSeriesWalkForward = useCallback(
+    async (kind: Parameters<typeof fetchSeries>[1], opts?: Parameters<typeof fetchSeries>[2]) => {
+      const steps = walkForwardAppliedSteps ?? [];
+      const responses = await Promise.all(
+        steps.map((step) => fetchSeries(buildWalkForwardSeriesSelection(step), kind, opts)),
+      );
+      return mergeSeriesResponses(responses, kind);
+    },
+    [buildWalkForwardSeriesSelection, mergeSeriesResponses, walkForwardAppliedSteps],
+  );
+
+  const fetchDrawdownWalkForward = useCallback(
+    async (opts?: Parameters<typeof fetchSeries>[2]) => {
+      const equityResponse = await fetchEquityWalkForward(opts);
+      return computeDrawdownSeries(equityResponse);
+    },
+    [computeDrawdownSeries, fetchEquityWalkForward],
+  );
+
+  const fetchEquityPercentWalkForward = useCallback(
+    async (opts?: Parameters<typeof fetchSeries>[2]) => {
+      const equityResponse = await fetchEquityWalkForward(opts);
+      return computeEquityPercentSeries(equityResponse);
+    },
+    [computeEquityPercentSeries, fetchEquityWalkForward],
+  );
+
+  const fetchHistogramWalkForward = useCallback(async () => {
+    const steps = walkForwardAppliedSteps ?? [];
+    const responses = await Promise.all(steps.map((step) => fetchHistogram(buildWalkForwardSelection(step))));
+    return mergeHistogramResponses(responses);
+  }, [buildWalkForwardSelection, mergeHistogramResponses, walkForwardAppliedSteps]);
+
+  const fetchMetricsWalkForward = useCallback(async () => {
+    const steps = walkForwardAppliedSteps ?? [];
+    const responses = await Promise.all(steps.map((step) => fetchMetrics(buildWalkForwardSelection(step))));
+    return mergeMetricsResponses(responses);
+  }, [buildWalkForwardSelection, mergeMetricsResponses, walkForwardAppliedSteps]);
+
+  const fetchCtaWalkForward = useCallback(async () => {
+    const steps = walkForwardAppliedSteps ?? [];
+    const responses = await Promise.all(steps.map((step) => fetchCta(buildWalkForwardSelection(step))));
+    return mergeCtaResponses(responses);
+  }, [buildWalkForwardSelection, mergeCtaResponses, walkForwardAppliedSteps]);
 
 
 
   const equityQuery = useQuery({
-
-    queryKey: ['equity', selectionKey, includeDownsample],
-
-    queryFn: () => fetchSeries(selectionForFetch, 'equity', { downsample: includeDownsample }),
-
+    queryKey: ['equity', walkForwardActive ? walkForwardSelectionKey : selectionKey, includeDownsample],
+    queryFn: () =>
+      walkForwardActive
+        ? fetchEquityWalkForward({ downsample: includeDownsample })
+        : fetchSeries(selectionForFetch, 'equity', { downsample: includeDownsample }),
     staleTime: STALE_TIME,
-
-    enabled: canQueryData,
-
+    enabled: canQueryData && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
 
   const equityPctQuery = useQuery({
-
-    queryKey: ['equityPercent', selectionKey, includeDownsample],
-
-    queryFn: () => fetchSeries(selectionForFetch, 'equityPercent', { downsample: includeDownsample }),
-
+    queryKey: ['equityPercent', walkForwardActive ? walkForwardSelectionKey : selectionKey, includeDownsample],
+    queryFn: () =>
+      walkForwardActive
+        ? fetchEquityPercentWalkForward({ downsample: includeDownsample })
+        : fetchSeries(selectionForFetch, 'equityPercent', { downsample: includeDownsample }),
     staleTime: STALE_TIME,
-
-    enabled: canQueryData,
-
+    enabled: canQueryData && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
 
   const drawdownQuery = useQuery({
-
-    queryKey: ['drawdown', selectionKey, includeDownsample],
-
-    queryFn: () => fetchSeries(selectionForFetch, 'drawdown', { downsample: includeDownsample }),
-
+    queryKey: ['drawdown', walkForwardActive ? walkForwardSelectionKey : selectionKey, includeDownsample],
+    queryFn: () =>
+      walkForwardActive
+        ? fetchDrawdownWalkForward({ downsample: includeDownsample })
+        : fetchSeries(selectionForFetch, 'drawdown', { downsample: includeDownsample }),
     staleTime: STALE_TIME,
-
-    enabled: canQueryData,
-
+    enabled: canQueryData && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
 
   const intradayDdQuery = useQuery({
-
-    queryKey: ['intradayDrawdown', selectionKey, includeDownsample],
-
-    queryFn: () => fetchSeries(selectionForFetch, 'intradayDrawdown', { downsample: includeDownsample }),
-
+    queryKey: ['intradayDrawdown', walkForwardActive ? walkForwardSelectionKey : selectionKey, includeDownsample],
+    queryFn: () =>
+      walkForwardActive
+        ? fetchSeriesWalkForward('intradayDrawdown', { downsample: includeDownsample })
+        : fetchSeries(selectionForFetch, 'intradayDrawdown', { downsample: includeDownsample }),
     staleTime: STALE_TIME,
-
-    enabled: canQueryData,
-
+    enabled: canQueryData && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
 
   const netposQuery = useQuery({
-
-    queryKey: ['netpos', selectionKey, includeDownsample],
-
-    queryFn: () => fetchSeries(selectionForFetch, 'netpos', { downsample: includeDownsample }),
-
+    queryKey: ['netpos', walkForwardActive ? walkForwardSelectionKey : selectionKey, includeDownsample],
+    queryFn: () =>
+      walkForwardActive
+        ? fetchSeriesWalkForward('netpos', { downsample: includeDownsample })
+        : fetchSeries(selectionForFetch, 'netpos', { downsample: includeDownsample }),
     staleTime: STALE_TIME,
-
-    enabled: canQueryData,
-
+    enabled: canQueryData && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
 
   const marginQuery = useQuery({
-
-    queryKey: ['margin', selectionKey, includeDownsample],
-
-    queryFn: () => fetchSeries(selectionForFetch, 'margin', { downsample: includeDownsample }),
-
+    queryKey: ['margin', walkForwardActive ? walkForwardSelectionKey : selectionKey, includeDownsample],
+    queryFn: () =>
+      walkForwardActive
+        ? fetchSeriesWalkForward('margin', { downsample: includeDownsample })
+        : fetchSeries(selectionForFetch, 'margin', { downsample: includeDownsample }),
     staleTime: STALE_TIME,
-
-    enabled: canQueryData,
-
+    enabled: canQueryData && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
 
   const netposPerFileQuery = useQuery({
-    queryKey: ['netpos', selectionKey, includeDownsample, 'per_file'],
+    queryKey: ['netpos', walkForwardActive ? walkForwardSelectionKey : selectionKey, includeDownsample, 'per_file'],
     queryFn: () =>
-      fetchSeries(selectionForFetch, 'netpos', { downsample: includeDownsample, exposureView: 'per_file' }),
+      walkForwardActive
+        ? fetchSeriesWalkForward('netpos', { downsample: includeDownsample, exposureView: 'per_file' })
+        : fetchSeries(selectionForFetch, 'netpos', { downsample: includeDownsample, exposureView: 'per_file' }),
     staleTime: STALE_TIME,
-    enabled: canQueryData && showExposureDebug,
+    enabled: canQueryData && showExposureDebug && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
 
   const netposPerSymbolQuery = useQuery({
-    queryKey: ['netpos', selectionKey, includeDownsample, 'per_symbol'],
+    queryKey: ['netpos', walkForwardActive ? walkForwardSelectionKey : selectionKey, includeDownsample, 'per_symbol'],
     queryFn: () =>
-      fetchSeries(selectionForFetch, 'netpos', { downsample: includeDownsample, exposureView: 'per_symbol' }),
+      walkForwardActive
+        ? fetchSeriesWalkForward('netpos', { downsample: includeDownsample, exposureView: 'per_symbol' })
+        : fetchSeries(selectionForFetch, 'netpos', { downsample: includeDownsample, exposureView: 'per_symbol' }),
     staleTime: STALE_TIME,
-    enabled: canQueryData && showExposureDebug,
+    enabled: canQueryData && showExposureDebug && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
 
   const netposPortfolioStepQuery = useQuery({
-    queryKey: ['netpos', selectionKey, includeDownsample, 'portfolio_step'],
+    queryKey: ['netpos', walkForwardActive ? walkForwardSelectionKey : selectionKey, includeDownsample, 'portfolio_step'],
     queryFn: () =>
-      fetchSeries(selectionForFetch, 'netpos', { downsample: includeDownsample, exposureView: 'portfolio_step' }),
+      walkForwardActive
+        ? fetchSeriesWalkForward('netpos', { downsample: includeDownsample, exposureView: 'portfolio_step' })
+        : fetchSeries(selectionForFetch, 'netpos', { downsample: includeDownsample, exposureView: 'portfolio_step' }),
     staleTime: STALE_TIME,
-    enabled: canQueryData && showExposureDebug,
+    enabled: canQueryData && showExposureDebug && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
 
   const marginPerFileQuery = useQuery({
-    queryKey: ['margin', selectionKey, includeDownsample, 'per_file'],
+    queryKey: ['margin', walkForwardActive ? walkForwardSelectionKey : selectionKey, includeDownsample, 'per_file'],
     queryFn: () =>
-      fetchSeries(selectionForFetch, 'margin', { downsample: includeDownsample, exposureView: 'per_file' }),
+      walkForwardActive
+        ? fetchSeriesWalkForward('margin', { downsample: includeDownsample, exposureView: 'per_file' })
+        : fetchSeries(selectionForFetch, 'margin', { downsample: includeDownsample, exposureView: 'per_file' }),
     staleTime: STALE_TIME,
-    enabled: canQueryData && showExposureDebug,
+    enabled: canQueryData && showExposureDebug && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
 
   const marginPerSymbolQuery = useQuery({
-    queryKey: ['margin', selectionKey, includeDownsample, 'per_symbol'],
+    queryKey: ['margin', walkForwardActive ? walkForwardSelectionKey : selectionKey, includeDownsample, 'per_symbol'],
     queryFn: () =>
-      fetchSeries(selectionForFetch, 'margin', { downsample: includeDownsample, exposureView: 'per_symbol' }),
+      walkForwardActive
+        ? fetchSeriesWalkForward('margin', { downsample: includeDownsample, exposureView: 'per_symbol' })
+        : fetchSeries(selectionForFetch, 'margin', { downsample: includeDownsample, exposureView: 'per_symbol' }),
     staleTime: STALE_TIME,
-    enabled: canQueryData && showExposureDebug,
+    enabled: canQueryData && showExposureDebug && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
 
   const marginPortfolioStepQuery = useQuery({
-    queryKey: ['margin', selectionKey, includeDownsample, 'portfolio_step'],
+    queryKey: ['margin', walkForwardActive ? walkForwardSelectionKey : selectionKey, includeDownsample, 'portfolio_step'],
     queryFn: () =>
-      fetchSeries(selectionForFetch, 'margin', { downsample: includeDownsample, exposureView: 'portfolio_step' }),
+      walkForwardActive
+        ? fetchSeriesWalkForward('margin', { downsample: includeDownsample, exposureView: 'portfolio_step' })
+        : fetchSeries(selectionForFetch, 'margin', { downsample: includeDownsample, exposureView: 'portfolio_step' }),
     staleTime: STALE_TIME,
-    enabled: canQueryData,
+    enabled: canQueryData && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
 
   const histogramQuery = useQuery({
-
-    queryKey: ['histogram', selectionKey],
-
-    queryFn: () => fetchHistogram(selectionForFetch),
-
+    queryKey: ['histogram', walkForwardActive ? walkForwardSelectionKey : selectionKey],
+    queryFn: () => (walkForwardActive ? fetchHistogramWalkForward() : fetchHistogram(selectionForFetch)),
     staleTime: STALE_TIME,
-
-    enabled: canQueryData,
-
+    enabled: canQueryData && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
 
   const ctaQuery = useQuery({
-    queryKey: ['cta', selectionKey],
-    queryFn: () => fetchCta(selectionForFetch),
+    queryKey: ['cta', walkForwardActive ? walkForwardSelectionKey : selectionKey],
+    queryFn: () => (walkForwardActive ? fetchCtaWalkForward() : fetchCta(selectionForFetch)),
     staleTime: STALE_TIME,
-    enabled: canQueryData,
+    enabled: canQueryData && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
 
   const metricsQuery = useQuery({
-
-    queryKey: ['metrics', selectionKey, metricsRequested],
-
-    queryFn: () => fetchMetrics(selectionForFetch),
-
+    queryKey: ['metrics', walkForwardActive ? walkForwardSelectionKey : selectionKey, metricsRequested],
+    queryFn: () => (walkForwardActive ? fetchMetricsWalkForward() : fetchMetrics(selectionForFetch)),
     staleTime: STALE_TIME,
-
-    enabled: canQueryData && metricsRequested,
-
+    enabled: canQueryData && metricsRequested && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
 
 
@@ -2947,6 +3793,205 @@ export default function HomePage() {
             </div>
           </div>
 
+          <div className="card" style={{ marginTop: 14 }}>
+            <strong>Walk Forward Optimizer</strong>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: 12,
+                marginTop: 12,
+              }}
+            >
+              <div>
+                <div className="field-label">In-sample start</div>
+                <div className="flex gap-sm">
+                  <select
+                    className="input"
+                    value={walkForwardStartMonth}
+                    onChange={(event) => setWalkForwardStartMonth(Number(event.target.value))}
+                  >
+                    {MONTH_OPTIONS.map((month) => (
+                      <option key={month.value} value={month.value}>
+                        {month.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1900}
+                    max={2100}
+                    value={walkForwardStartYear}
+                    onChange={(event) => setWalkForwardStartYear(Number(event.target.value))}
+                  />
+                </div>
+              </div>
+              <div>
+                <div className="field-label">In-sample end</div>
+                <div className="flex gap-sm">
+                  <select
+                    className="input"
+                    value={walkForwardInSampleEndMonth}
+                    onChange={(event) => setWalkForwardInSampleEndMonth(Number(event.target.value))}
+                  >
+                    {MONTH_OPTIONS.map((month) => (
+                      <option key={month.value} value={month.value}>
+                        {month.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1900}
+                    max={2100}
+                    value={walkForwardInSampleEndYear}
+                    onChange={(event) => setWalkForwardInSampleEndYear(Number(event.target.value))}
+                  />
+                </div>
+              </div>
+              <div>
+                <div className="field-label">Out-of-sample end</div>
+                <div className="flex gap-sm">
+                  <select
+                    className="input"
+                    value={walkForwardOutSampleEndMonth}
+                    onChange={(event) => setWalkForwardOutSampleEndMonth(Number(event.target.value))}
+                  >
+                    {MONTH_OPTIONS.map((month) => (
+                      <option key={month.value} value={month.value}>
+                        {month.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1900}
+                    max={2100}
+                    value={walkForwardOutSampleEndYear}
+                    onChange={(event) => setWalkForwardOutSampleEndYear(Number(event.target.value))}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-md" style={{ marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="button"
+                onClick={handleRunWalkForward}
+                disabled={walkForwardRunning || Boolean(walkForwardPlan.error)}
+              >
+                {walkForwardRunning ? 'Running Walk Forward...' : 'Run Walk Forward'}
+              </button>
+              <button
+                type="button"
+                className="button"
+                onClick={handleCancelWalkForward}
+                disabled={!walkForwardRunning}
+              >
+                Cancel
+              </button>
+              <div className="text-muted small">
+                {walkForwardPlan.error
+                  ? walkForwardPlan.error
+                  : `${walkForwardPlan.steps.length} step${walkForwardPlan.steps.length === 1 ? '' : 's'} · ` +
+                    `${walkForwardInSampleMonths} in-sample month${walkForwardInSampleMonths === 1 ? '' : 's'} · ` +
+                    `${walkForwardOutSampleMonths} out-of-sample month${walkForwardOutSampleMonths === 1 ? '' : 's'}`}
+              </div>
+              <div
+                style={{
+                  flex: 1,
+                  minWidth: 180,
+                  background: '#1f2f4a',
+                  borderRadius: 6,
+                  height: 10,
+                  overflow: 'hidden',
+                }}
+              >
+                <div style={{ width: `${walkForwardProgress}%`, background: '#8fe3c7', height: '100%' }} />
+              </div>
+            </div>
+            {walkForwardError ? (
+              <div className="text-error small" style={{ marginTop: 8 }}>{walkForwardError}</div>
+            ) : (
+              <div className="text-muted small" style={{ marginTop: 8 }}>
+                Walk forward runs the optimizer on each in-sample window and records the resulting contracts for the
+                out-of-sample months.
+              </div>
+            )}
+
+            <div className="flex gap-md" style={{ alignItems: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+              <label className="field-label" htmlFor="walk-forward-equity" style={{ margin: 0 }}>
+                Account Equity
+              </label>
+              <input
+                id="walk-forward-equity"
+                className="input"
+                type="number"
+                min={0}
+                step={100}
+                value={walkForwardContractEquity}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setWalkForwardContractEquity(Number.isFinite(next) ? next : 0);
+                }}
+                style={{ maxWidth: 200 }}
+              />
+              <button
+                type="button"
+                className="button"
+                disabled={!walkForwardContracts.length}
+                onClick={handleApplyWalkForwardContracts}
+              >
+                Apply Walk Forward Contracts
+              </button>
+            </div>
+            <div className="text-muted small" style={{ marginTop: 8 }} role="status" aria-live="polite">
+              {walkForwardApplyMessage ||
+                (walkForwardContracts.length
+                  ? 'Adjust account equity to recalibrate contracts before applying.'
+                  : 'Run walk forward to populate contracts.')}
+            </div>
+
+            <div className="table-wrapper" style={{ marginTop: 12 }}>
+              <table className="compact-table">
+                <thead>
+                  <tr>
+                    <th>Step</th>
+                    <th>In-sample range</th>
+                    <th>Out-of-sample range</th>
+                    {walkForwardAssets.map((asset) => (
+                      <th key={asset}>{fileLabelMap[asset] || asset}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {walkForwardContracts.length ? (
+                    walkForwardContracts.map((step) => (
+                      <tr key={step.id}>
+                        <td>{step.index}</td>
+                        <td>{formatWalkForwardRangeFromDate(step.inSampleStart, step.inSampleEnd)}</td>
+                        <td>{formatWalkForwardRangeFromDate(step.outSampleStart, step.outSampleEnd)}</td>
+                        {walkForwardAssets.map((asset) => (
+                          <td key={`${step.id}-${asset}`}>{step.contracts[asset]?.toLocaleString() ?? '0'}</td>
+                        ))}
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={3 + walkForwardAssets.length}>
+                        Run walk forward to populate the out-of-sample contract table.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <div className="grid-2" style={{ marginTop: 16 }}>
             <div className="card">
               <strong>Frontier Explorer</strong>
@@ -3901,6 +4946,37 @@ export default function HomePage() {
 
       </p>
 
+      <div className="card" style={{ marginTop: 12 }}>
+        <strong>Data Mode</strong>
+        <div className="tabs" style={{ borderBottom: 'none', gap: 6, marginTop: 10 }}>
+          <button
+            type="button"
+            className={`tab ${loadTradeListMode === 'standard' ? 'tab-active' : ''}`}
+            onClick={() => setLoadTradeListMode('standard')}
+          >
+            Standard
+          </button>
+          <button
+            type="button"
+            className={`tab ${loadTradeListMode === 'walk-forward' ? 'tab-active' : ''}`}
+            onClick={() => setLoadTradeListMode('walk-forward')}
+            disabled={!walkForwardAppliedSteps?.length}
+          >
+            Walk Forward
+          </button>
+        </div>
+        <div className="text-muted small" style={{ marginTop: 6 }}>
+          {loadTradeListMode === 'walk-forward'
+            ? 'Using walk forward contract schedules for downstream tabs.'
+            : 'Using the standard contracts and margins for all date ranges.'}
+        </div>
+        {loadTradeListMode === 'walk-forward' && !walkForwardAppliedSteps?.length ? (
+          <div className="text-muted small" style={{ marginTop: 6 }}>
+            Run walk forward in Riskfolio and apply contracts to enable this mode.
+          </div>
+        ) : null}
+      </div>
+
 
 
       <div className="card" style={{ marginTop: 14 }}>
@@ -3989,6 +5065,7 @@ export default function HomePage() {
 
         <>
 
+      {loadTradeListMode === 'standard' ? (
       <div className="grid-2" style={{ marginTop: 14 }}>
 
         <div className="card">
@@ -4234,7 +5311,144 @@ export default function HomePage() {
         </div>
 
       </div>
+      ) : (
+      <div className="card" style={{ marginTop: 14 }}>
+        <strong>Walk Forward Contract Schedule</strong>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 120px 140px',
+            gap: 10,
+            alignItems: 'center',
+            marginTop: 8,
+          }}
+        >
+          <div className="text-muted small" />
+          <button
+            type="button"
+            className="button"
+            style={{ width: '100%' }}
+            onClick={() => {
+              const defaults = Object.fromEntries(availableFiles.map((file) => [file, 1])) as Record<string, number>;
+              setWalkForwardAppliedSteps((prev) =>
+                prev?.map((step) => ({
+                  ...step,
+                  contracts: { ...step.contracts, ...defaults },
+                })) ?? null,
+              );
+            }}
+            disabled={!walkForwardAppliedSteps?.length}
+          >
+            Use default contracts (1)
+          </button>
+          <button
+            type="button"
+            className="button"
+            style={{ width: '100%' }}
+            onClick={() => {
+              const defaults = Object.fromEntries(
+                availableFiles.map((file) => [file, marginDefaultsByFile[file] ?? FALLBACK_MARGIN]),
+              ) as Record<string, number>;
+              setWalkForwardAppliedSteps((prev) =>
+                prev?.map((step) => ({
+                  ...step,
+                  margins: { ...step.margins, ...defaults },
+                })) ?? null,
+              );
+            }}
+            disabled={!walkForwardAppliedSteps?.length}
+          >
+            Use default margin
+          </button>
+        </div>
 
+        {walkForwardAppliedSteps?.length ? (
+          <div style={{ marginTop: 10, display: 'grid', gap: 12 }}>
+            {walkForwardAppliedSteps.map((step) => (
+              <div key={step.id} className="card" style={{ padding: '10px 12px' }}>
+                <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                  <strong>Out-of-sample: {formatWalkForwardRangeFromDate(step.outSampleStart, step.outSampleEnd)}</strong>
+                  <span className="text-muted small">
+                    {step.outSampleStart} to {step.outSampleEnd}
+                  </span>
+                </div>
+                <div className="file-rows" style={{ marginTop: 10, display: 'grid', gap: 10 }}>
+                  {availableFiles.map((fileId) => {
+                    const label = fileLabelMap[fileId] || fileId;
+                    const active = activeSelection.files.includes(fileId);
+                    const contractValue = step.contracts[fileId] ?? 0;
+                    const marginValue = step.margins[fileId] ?? marginDefaultsByFile[fileId] ?? '';
+                    const filteredIn = filteredFileSet.has(fileId);
+                    const filteredOut = active && !filteredIn;
+
+                    return (
+                      <div
+                        key={`${step.id}-${fileId}`}
+                        className="card"
+                        style={{
+                          padding: '10px 12px',
+                          display: 'grid',
+                          gridTemplateColumns: '1fr 120px 140px',
+                          gap: 10,
+                          alignItems: 'center',
+                        }}
+                      >
+                        <button
+                          type="button"
+                          className={`chip ${active ? 'chip-active' : ''}`}
+                          title={filteredOut ? 'Excluded by current filters' : undefined}
+                          onClick={() =>
+                            setActiveSelection((prev) => ({
+                              ...prev,
+                              files: active ? prev.files.filter((f) => f !== fileId) : [...prev.files, fileId],
+                            }))
+                          }
+                          style={{ justifyContent: 'flex-start', opacity: filteredOut ? 0.4 : 1 }}
+                        >
+                          {label}
+                        </button>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          className="input"
+                          style={{ opacity: filteredOut ? 0.5 : 1 }}
+                          value={contractValue}
+                          onChange={(event) => {
+                            const next = Number(event.target.value);
+                            handleWalkForwardContractChange(step.id, fileId, Number.isNaN(next) ? 0 : next);
+                          }}
+                          placeholder="Contracts"
+                        />
+                        <input
+                          type="number"
+                          step={100}
+                          className="input"
+                          style={{ opacity: filteredOut ? 0.5 : 1 }}
+                          value={marginValue}
+                          onChange={(event) => {
+                            const next = Number(event.target.value);
+                            handleWalkForwardMarginChange(step.id, fileId, Number.isNaN(next) ? 0 : next);
+                          }}
+                          placeholder="Margin $/contract"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="placeholder-text" style={{ marginTop: 10 }}>
+            Apply walk forward contracts from the Riskfolio tab to populate this schedule.
+          </div>
+        )}
+        <div className="text-muted small" style={{ marginTop: 8 }}>
+          Walk forward mode uses these contracts and margins for each out-of-sample window.
+        </div>
+      </div>
+      )}
 
 
       <div className="grid-2" style={{ marginTop: 14 }}>
