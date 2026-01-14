@@ -68,4 +68,25 @@ export function normalizeSelection(selection: Selection): Selection {
   };
 }
 
+export function selectionForApi(selection: Selection): Selection {
+  const normalized = normalizeSelection(selection);
+  return {
+    name: 'active',
+    files: normalized.files,
+    symbols: normalized.symbols,
+    intervals: normalized.intervals,
+    strategies: normalized.strategies,
+    direction: normalized.direction,
+    start: normalized.start ?? null,
+    end: normalized.end ?? null,
+    contracts: normalized.contracts,
+    margins: normalized.margins,
+    contractMultipliers: normalized.contractMultipliers,
+    marginOverrides: normalized.marginOverrides,
+    spike: normalized.spike,
+    downsample: normalized.downsample,
+    accountEquity: normalized.accountEquity ?? null,
+  };
+}
+
 export type { Selection } from './types/selection';
