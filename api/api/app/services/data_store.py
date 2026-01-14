@@ -562,6 +562,35 @@ class DataStore:
 
             self._ttl_seconds = 21_600
 
+    def _clone_view(self, view: PortfolioView) -> PortfolioView:
+        contributors: list[ContributorSeries] = []
+        for contributor in view.contributors:
+            bundle = contributor.bundle
+            cloned_bundle = type(bundle)(
+                equity=bundle.equity.clone(),
+                daily_returns=bundle.daily_returns.clone(),
+                daily_percent=bundle.daily_percent.clone(),
+                spikes=bundle.spikes.clone(),
+            )
+            contributors.append(
+                ContributorSeries(
+                    file_id=contributor.file_id,
+                    path=contributor.path,
+                    bundle=cloned_bundle,
+                    label=contributor.label,
+                    symbol=contributor.symbol,
+                    interval=contributor.interval,
+                    strategy=contributor.strategy,
+                )
+            )
+        return PortfolioView(
+            equity=view.equity.clone(),
+            daily_percent_portfolio=view.daily_percent_portfolio.clone(),
+            daily_returns=view.daily_returns.clone(),
+            contributors=contributors,
+            spikes=view.spikes.clone() if view.spikes is not None else None,
+        )
+
 
 
     # ---------------- ingest & metadata ----------------
@@ -843,59 +872,48 @@ class DataStore:
 
         cache_key = build_selection_key(key, selection.data_version, "portfolio")
 
+        base_view = self._portfolio_cache.get(key)
 
+        if base_view is None:
+            metas = metas or self._metas_for_selection(selection)
+            paths = [Path(m.trades_path) for m in metas]
 
-        metas = metas or self._metas_for_selection(selection)
+            cached_view = self._load_portfolio_from_cache(cache_key)
 
-        paths = [Path(m.trades_path) for m in metas]
+            if cached_view:
+                base_view = cached_view
+            else:
+                trades_map = loaded_trades or self._load_trades_map(metas)
+                built = self.aggregator.aggregate(
+                    paths,
+                    metas=metas,
+                    contract_multipliers=selection.contract_multipliers,
+                    margin_overrides=selection.margin_overrides,
+                    direction=selection.direction,
+                    include_spikes=selection.spike_flag,
+                    loaded_trades=trades_map,
+                )
+                base_view = PortfolioView(
+                    equity=built.equity.clone(),
+                    daily_percent_portfolio=built.daily_percent_portfolio.clone(),
+                    daily_returns=built.daily_returns.clone(),
+                    contributors=list(built.contributors),
+                    spikes=built.spikes.clone() if built.spikes is not None else None,
+                )
+                exposure_netpos, exposure_margin = self._build_portfolio_daily_exposure_frames(
+                    selection, metas, trades_map
+                )
 
-        trades_map = loaded_trades or self._load_trades_map(metas)
+                self._portfolio_exposure_cache[cache_key] = (exposure_netpos, exposure_margin)
+                self._persist_portfolio_to_cache(cache_key, base_view, exposure_netpos, exposure_margin)
 
-        cached_view = self._load_portfolio_from_cache(cache_key)
+            if not base_view.contributors:
+                trades_map = loaded_trades or self._load_trades_map(metas)
+                self._hydrate_contributors(base_view, metas, selection, paths, trades_map)
 
-        if cached_view:
+            self._portfolio_cache[key] = base_view
 
-            view = cached_view
-
-        else:
-
-            built = self.aggregator.aggregate(
-
-                paths,
-
-                metas=metas,
-
-                contract_multipliers=selection.contract_multipliers,
-
-                margin_overrides=selection.margin_overrides,
-
-                direction=selection.direction,
-
-                include_spikes=selection.spike_flag,
-
-                loaded_trades=trades_map,
-
-            )
-
-            view = PortfolioView(
-                equity=built.equity.clone(),
-                daily_percent_portfolio=built.daily_percent_portfolio.clone(),
-                daily_returns=built.daily_returns.clone(),
-                contributors=list(built.contributors),
-                spikes=built.spikes.clone() if built.spikes is not None else None,
-            )
-            exposure_netpos, exposure_margin = self._build_portfolio_daily_exposure_frames(
-                selection, metas, trades_map
-            )
-
-            self._portfolio_cache[key] = view
-
-            self._portfolio_exposure_cache[cache_key] = (exposure_netpos, exposure_margin)
-            self._persist_portfolio_to_cache(cache_key, view, exposure_netpos, exposure_margin)
-
-
-
-        self._hydrate_contributors(view, metas, selection, paths, trades_map)
+        view = self._clone_view(base_view)
         view = self._apply_account_equity(view, selection.account_equity)
         return self._filter_view_by_date(view, selection)
 
@@ -1076,6 +1094,7 @@ class DataStore:
             if start_dt or end_dt:
 
                 contributor.bundle.daily_returns = filter_frame(contributor.bundle.daily_returns, "date", is_date=True)
+                contributor.bundle.daily_percent = filter_frame(contributor.bundle.daily_percent, "date", is_date=True)
 
         return view
 

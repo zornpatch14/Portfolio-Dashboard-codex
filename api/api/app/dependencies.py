@@ -114,10 +114,12 @@ def get_selection(params: SelectionQueryParams = Depends(SelectionQueryParams)) 
     return params.selection
 
 
-def selection_hash(selection: Selection) -> str:
-    """Generate a deterministic hash for a selection payload."""
-
-    payload = selection.model_dump(exclude_none=True)
+def selection_hash(selection: Selection) -> str:
+    """Generate a deterministic hash for a selection payload."""
+
+    payload = selection.model_dump(exclude_none=True)
+    for transient_field in ("account_equity", "start_date", "end_date"):
+        payload.pop(transient_field, None)
     for key, value in list(payload.items()):
         if isinstance(value, list):
             payload[key] = sorted(value)

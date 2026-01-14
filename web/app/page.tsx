@@ -34,7 +34,7 @@ import {
   SelectionMeta,
 } from '../lib/api';
 
-import { blankSelection, normalizeSelection } from '../lib/selections';
+import { blankSelection, selectionForApi } from '../lib/selections';
 import type { Selection } from '../lib/types/selection';
 
 
@@ -1089,7 +1089,7 @@ export default function HomePage() {
 
 
   const selectionForFetch = useMemo(
-    () => normalizeSelection({ ...activeSelection, files: filteredFileIds, accountEquity }),
+    () => selectionForApi({ ...activeSelection, files: filteredFileIds, accountEquity }),
     [activeSelection, filteredFileIds, accountEquity],
   );
 
