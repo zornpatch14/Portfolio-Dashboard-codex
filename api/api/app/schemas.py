@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Literal
 
 
 
@@ -155,6 +155,12 @@ class HistogramResponse(BaseModel):
     selection: Selection
 
     buckets: List[HistogramBucket]
+
+
+class HistogramCompositeRequest(BaseModel):
+    selections: List[Selection]
+    bins: int = 16
+    mode: Literal["trade", "daily"] = "trade"
 
 
 

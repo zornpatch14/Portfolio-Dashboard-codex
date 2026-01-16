@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Literal
 
 from fastapi import APIRouter, Depends, Query
 
 from ..dependencies import DownsampleFlag, get_selection
-from ..schemas import HistogramResponse, SeriesResponse
+from ..schemas import HistogramCompositeRequest, HistogramResponse, SeriesResponse
 from ..services.data_store import store
 
 ExposureView = str
@@ -32,5 +32,14 @@ router.add_api_route("/intraday-dd", _series_endpoint("intraday_drawdown"), resp
 router.add_api_route("/netpos", _series_endpoint("netpos"), response_model=SeriesResponse, methods=["GET"])
 router.add_api_route("/margin", _series_endpoint("margin"), response_model=SeriesResponse, methods=["GET"])
 @router.get("/histogram", response_model=HistogramResponse)
-async def histogram(selection=Depends(get_selection)) -> HistogramResponse:  # type: ignore[override]
-    return store.histogram(selection)
+async def histogram(
+    selection=Depends(get_selection),
+    mode: Literal["trade", "daily"] = Query(default="trade"),
+    bins: int = Query(default=16, ge=1, le=200),
+) -> HistogramResponse:  # type: ignore[override]
+    return store.histogram(selection, bins=bins, mode=mode)
+
+
+@router.post("/histogram/composite", response_model=HistogramResponse)
+async def histogram_composite(payload: HistogramCompositeRequest) -> HistogramResponse:
+    return store.histogram_composite(payload.selections, bins=payload.bins, mode=payload.mode)

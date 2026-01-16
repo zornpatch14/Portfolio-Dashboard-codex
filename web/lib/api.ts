@@ -87,6 +87,10 @@ export type HistogramBucket = {
 
 
 
+export type HistogramMode = 'trade' | 'daily';
+
+
+
 export type HistogramResponse = {
 
   label: string;
@@ -365,6 +369,7 @@ const endpoint: Record<SeriesKind | 'metrics' | 'histogram', string> = {
   metrics: '/api/v1/metrics',
 
 };
+const histogramCompositeEndpoint = '/api/v1/series/histogram/composite';
 const ctaEndpoint = '/api/v1/cta';
 
 const riskfolioEndpoint = '/api/v1/optimizer/riskfolio';
@@ -509,11 +514,11 @@ export async function fetchMetrics(selection: Selection) {
 
 
 
-export async function fetchHistogram(selection: Selection) {
-
-  const query = selectionQuery(selection);
-
-  const path = `${endpoint.histogram}?${query}`;
+export async function fetchHistogram(selection: Selection, opts?: { mode?: HistogramMode; bins?: number }) {
+  const params = new URLSearchParams(selectionQuery(selection));
+  if (opts?.mode) params.set('mode', opts.mode);
+  if (opts?.bins !== undefined) params.set('bins', String(opts.bins));
+  const path = `${endpoint.histogram}?${params.toString()}`;
 
   if (!API_BASE) {
 
@@ -531,6 +536,31 @@ export async function fetchHistogram(selection: Selection) {
 
   return (await response.json()) as HistogramResponse;
 
+}
+
+export async function fetchHistogramComposite(
+  selections: Selection[],
+  opts?: { mode?: HistogramMode; bins?: number },
+) {
+  const path = histogramCompositeEndpoint;
+  if (!API_BASE) {
+    throw new Error('NEXT_PUBLIC_API_BASE is not set; cannot load histogram');
+  }
+  const payload = {
+    selections: selections.map(selectionToApiPayload),
+    mode: opts?.mode ?? 'trade',
+    bins: opts?.bins ?? 16,
+  };
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    raiseResponseError(response);
+  }
+  return (await response.json()) as HistogramResponse;
 }
 
 

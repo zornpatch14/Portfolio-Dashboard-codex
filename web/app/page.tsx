@@ -20,6 +20,7 @@ import { CtaTimeSeriesChart } from '../components/CtaTimeSeriesChart';
 import {
   fetchCta,
   fetchHistogram,
+  fetchHistogramComposite,
   fetchMetrics,
   fetchSeries,
   fetchJobStatus,
@@ -32,7 +33,6 @@ import {
   MeanRiskPayload,
   coerceNumber,
   SelectionMeta,
-  HistogramResponse,
   MetricsResponse,
   CtaResponse,
 } from '../lib/api';
@@ -58,6 +58,9 @@ const MARGIN_DEFAULTS: Record<string, number> = {
 };
 const FALLBACK_MARGIN = 10000;
 const ACCOUNT_EQUITY_FALLBACK = 25000;
+const HISTOGRAM_BINS_DEFAULT = 16;
+const HISTOGRAM_BINS_MIN = 4;
+const HISTOGRAM_BINS_MAX = 60;
 
 const tabs = [
   { key: 'load-trade-lists', label: 'Load Trade Lists' },
@@ -433,6 +436,7 @@ export default function HomePage() {
   const [showExposureDebug, setShowExposureDebug] = useState(false);
 
   const [plotHistogramEnabled, setPlotHistogramEnabled] = useState<Record<string, boolean>>({});
+  const [histogramBins, setHistogramBins] = useState(HISTOGRAM_BINS_DEFAULT);
 
   const [riskfolioMode, setRiskfolioMode] = useState<'mean-risk' | 'risk-parity' | 'hierarchical'>('mean-risk');
   const [meanRiskObjective, setMeanRiskObjective] = useState('MinRisk');
@@ -1875,29 +1879,6 @@ export default function HomePage() {
     [selectionForFetch],
   );
 
-  const mergeHistogramResponses = useCallback((responses: HistogramResponse[]) => {
-    if (!responses.length) {
-      return { label: 'Portfolio Histogram', buckets: [] };
-    }
-    const bucketMap = new Map<string, HistogramResponse['buckets'][number]>();
-    responses.forEach((response) => {
-      response.buckets.forEach((bucket) => {
-        const key = `${bucket.start_value}-${bucket.end_value}`;
-        const existing = bucketMap.get(key);
-        if (existing) {
-          existing.count += bucket.count;
-        } else {
-          bucketMap.set(key, { ...bucket });
-        }
-      });
-    });
-    const buckets = Array.from(bucketMap.values()).sort((a, b) => a.start_value - b.start_value);
-    return {
-      label: responses[0].label ?? 'Portfolio Histogram',
-      buckets,
-    };
-  }, []);
-
   const aggregateMetrics = useCallback((metricsList: Record<string, number | string | null>[]) => {
     const totals = {
       total_net_profit: 0,
@@ -2185,9 +2166,21 @@ export default function HomePage() {
 
   const fetchHistogramWalkForward = useCallback(async () => {
     const steps = walkForwardAppliedSteps ?? [];
-    const responses = await Promise.all(steps.map((step) => fetchHistogram(buildWalkForwardSelection(step))));
-    return mergeHistogramResponses(responses);
-  }, [buildWalkForwardSelection, mergeHistogramResponses, walkForwardAppliedSteps]);
+    if (!steps.length) {
+      return { label: 'Portfolio Histogram', buckets: [] };
+    }
+    const selections = steps.map((step) => buildWalkForwardSelection(step));
+    return fetchHistogramComposite(selections, { mode: 'trade', bins: histogramBins });
+  }, [buildWalkForwardSelection, fetchHistogramComposite, histogramBins, walkForwardAppliedSteps]);
+
+  const fetchDailyHistogramWalkForward = useCallback(async () => {
+    const steps = walkForwardAppliedSteps ?? [];
+    if (!steps.length) {
+      return { label: 'Daily P/L Histogram', buckets: [] };
+    }
+    const selections = steps.map((step) => buildWalkForwardSelection(step));
+    return fetchHistogramComposite(selections, { mode: 'daily', bins: histogramBins });
+  }, [buildWalkForwardSelection, fetchHistogramComposite, histogramBins, walkForwardAppliedSteps]);
 
   const fetchMetricsWalkForward = useCallback(async () => {
     const steps = walkForwardAppliedSteps ?? [];
@@ -2324,8 +2317,21 @@ export default function HomePage() {
   });
 
   const histogramQuery = useQuery({
-    queryKey: ['histogram', walkForwardActive ? walkForwardSelectionKey : selectionKey],
-    queryFn: () => (walkForwardActive ? fetchHistogramWalkForward() : fetchHistogram(selectionForFetch)),
+    queryKey: ['histogram', walkForwardActive ? walkForwardSelectionKey : selectionKey, histogramBins],
+    queryFn: () =>
+      walkForwardActive
+        ? fetchHistogramWalkForward()
+        : fetchHistogram(selectionForFetch, { mode: 'trade', bins: histogramBins }),
+    staleTime: STALE_TIME,
+    enabled: canQueryData && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
+  });
+
+  const dailyHistogramQuery = useQuery({
+    queryKey: ['histogram', 'daily', walkForwardActive ? walkForwardSelectionKey : selectionKey, histogramBins],
+    queryFn: () =>
+      walkForwardActive
+        ? fetchDailyHistogramWalkForward()
+        : fetchHistogram(selectionForFetch, { mode: 'daily', bins: histogramBins }),
     staleTime: STALE_TIME,
     enabled: canQueryData && (!walkForwardActive || Boolean(walkForwardAppliedSteps?.length)),
   });
@@ -2740,6 +2746,11 @@ export default function HomePage() {
 
   }, [histogramQuery.data]);
 
+  const dailyHistogramBuckets = useMemo(
+    () => dailyHistogramQuery.data?.buckets ?? [],
+    [dailyHistogramQuery.data],
+  );
+
 
 
   useEffect(() => {
@@ -2829,6 +2840,7 @@ export default function HomePage() {
     marginQuery.isFetching ||
 
     histogramQuery.isFetching ||
+    dailyHistogramQuery.isFetching ||
 
     marginPortfolioStepQuery.isFetching ||
     exposureDebugFetching;
@@ -4666,7 +4678,26 @@ export default function HomePage() {
 
         <h3 className="section-title" style={{ margin: 0 }}>Trade P/L Histogram</h3>
 
-        {activeBadge}
+        <div className="flex" style={{ alignItems: 'center', gap: 12 }}>
+          <label className="text-muted small" htmlFor="histogram-bins">Buckets</label>
+          <input
+            id="histogram-bins"
+            className="input"
+            type="number"
+            min={HISTOGRAM_BINS_MIN}
+            max={HISTOGRAM_BINS_MAX}
+            step={1}
+            value={histogramBins}
+            onChange={(event) => {
+              const next = event.target.valueAsNumber;
+              if (!Number.isFinite(next)) return;
+              const clamped = Math.min(HISTOGRAM_BINS_MAX, Math.max(HISTOGRAM_BINS_MIN, Math.round(next)));
+              setHistogramBins(clamped);
+            }}
+            style={{ width: 110 }}
+          />
+          {activeBadge}
+        </div>
 
       </div>
 
@@ -4749,6 +4780,14 @@ export default function HomePage() {
           bucket: formatHistogramPercentRange(bucket.start_value, bucket.end_value, accountEquity),
 
         }));
+        const dailyBucketsDollar = dailyHistogramBuckets.map((bucket) => ({
+          ...bucket,
+          bucket: formatHistogramDollarRange(bucket.start_value, bucket.end_value),
+        }));
+        const dailyBucketsPercent = dailyHistogramBuckets.map((bucket) => ({
+          ...bucket,
+          bucket: formatHistogramPercentRange(bucket.start_value, bucket.end_value, accountEquity),
+        }));
 
         return (
 
@@ -4783,6 +4822,38 @@ export default function HomePage() {
               <HistogramChart histogram={{ label: 'Portfolio Histogram (%)', buckets: portfolioBucketsPercent }} />
 
               <div className="text-muted small" style={{ marginTop: 8 }}>Buckets: {portfolioBucketsPercent.length}</div>
+
+            </div>
+
+            <div className="card">
+
+              <strong>Daily P/L Histogram ($)</strong>
+
+              <div className="text-muted small" style={{ marginTop: 4 }}>
+
+                Daily P/L distribution across the selected period.
+
+              </div>
+
+              <HistogramChart histogram={{ label: 'Daily P/L Histogram ($)', buckets: dailyBucketsDollar }} />
+
+              <div className="text-muted small" style={{ marginTop: 8 }}>Buckets: {dailyBucketsDollar.length}</div>
+
+            </div>
+
+            <div className="card">
+
+              <strong>Daily P/L Histogram (%)</strong>
+
+              <div className="text-muted small" style={{ marginTop: 4 }}>
+
+                Daily return distribution as a percent of account equity.
+
+              </div>
+
+              <HistogramChart histogram={{ label: 'Daily P/L Histogram (%)', buckets: dailyBucketsPercent }} />
+
+              <div className="text-muted small" style={{ marginTop: 8 }}>Buckets: {dailyBucketsPercent.length}</div>
 
             </div>
 

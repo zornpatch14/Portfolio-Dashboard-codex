@@ -1717,58 +1717,164 @@ class DataStore:
 
 
 
-    def histogram(self, selection: Selection, bins: int = 16) -> HistogramResponse:
+    def histogram(
+        self,
+        selection: Selection,
+        bins: int = 16,
+        mode: str = "trade",
+    ) -> HistogramResponse:
 
-        view = self._view_for_selection(selection)
-
-        returns = view.daily_returns
-
-
-
-        if returns.is_empty():
-
+        values = self._histogram_values_for_selection(selection, mode)
+        if values.size == 0:
             return HistogramResponse(label="return_distribution", selection=selection, buckets=[])
-
-
-
-        values = returns["pnl"].to_numpy()
-
-        max_abs = float(np.max(np.abs(values)))
-        if max_abs == 0:
-            edges = np.linspace(-1, 1, bins + 1)
-        else:
-            edges = np.linspace(-max_abs, max_abs, bins + 1)
-        hist, _ = np.histogram(values, bins=edges)
-
-        def _format_range(start: float, end: float) -> str:
-
-            return f"${start:,.2f} to ${end:,.2f}"
-
-        buckets: list[HistogramBucket] = []
-
-        for count, start, end in zip(hist, edges[:-1], edges[1:]):
-
-            label = _format_range(float(start), float(end))
-
-            buckets.append(
-
-                HistogramBucket(
-
-                    bucket=label,
-
-                    count=int(count),
-
-                    start_value=float(start),
-
-                    end_value=float(end),
-
-                )
-
-            )
-
-
+        buckets = self._build_histogram_buckets(values, bins)
 
         return HistogramResponse(label="return_distribution", selection=selection, buckets=buckets)
+
+    def histogram_composite(
+        self,
+        selections: list[Selection],
+        bins: int = 16,
+        mode: str = "trade",
+    ) -> HistogramResponse:
+        if not selections:
+            return HistogramResponse(
+                label="return_distribution", selection=Selection(), buckets=[]
+            )
+
+        values_list: list[np.ndarray] = []
+        for selection in selections:
+            values = self._histogram_values_for_selection(selection, mode)
+            if values.size == 0:
+                continue
+            values_list.append(values)
+
+        if not values_list:
+            return HistogramResponse(label="return_distribution", selection=selections[0], buckets=[])
+
+        values = np.concatenate(values_list)
+        buckets = self._build_histogram_buckets(values, bins)
+        return HistogramResponse(label="return_distribution", selection=selections[0], buckets=buckets)
+
+    def _histogram_values_for_selection(self, selection: Selection, mode: str) -> np.ndarray:
+        mode_key = mode.lower().strip()
+        if mode_key == "daily":
+            return self._daily_pnl_values(selection)
+        return self._trade_pnl_values(selection)
+
+    def _trade_pnl_values(self, selection: Selection) -> np.ndarray:
+        metas = self._metas_for_selection(selection)
+        loaded_trades = self._load_trades_map(metas)
+        pnl_chunks: list[np.ndarray] = []
+
+        for meta in metas:
+            loaded = loaded_trades.get(meta.file_id)
+            if loaded is None:
+                loaded = self.cache.load_trades(Path(meta.trades_path))
+                loaded_trades[meta.file_id] = loaded
+            trades_df = self.cache._filter_by_direction(loaded.trades, selection.direction)
+            cmult = selection.contract_multipliers.get(meta.file_id)
+            if cmult is not None:
+                trades_df = self.cache._apply_contract_multiplier(trades_df, float(cmult))
+            trades_df = self._filter_trades_by_date(trades_df, selection)
+            if "net_profit" not in trades_df.columns or trades_df.is_empty():
+                continue
+            pnl_chunks.append(trades_df["net_profit"].to_numpy())
+
+        if not pnl_chunks:
+            return np.array([])
+        return np.concatenate(pnl_chunks)
+
+    def _daily_pnl_values(self, selection: Selection) -> np.ndarray:
+        view = self._view_for_selection(selection)
+        returns = view.daily_returns
+        if returns.is_empty():
+            return np.array([])
+        return returns["pnl"].to_numpy()
+
+    @staticmethod
+    def _filter_trades_by_date(trades: pl.DataFrame, selection: Selection) -> pl.DataFrame:
+        if trades.is_empty() or "exit_time" not in trades.columns:
+            return trades
+        start_dt = selection.start_date
+        end_dt = selection.end_date
+        if not start_dt and not end_dt:
+            return trades
+        filtered = trades.filter(pl.col("exit_time").is_not_null())
+        if start_dt:
+            filtered = filtered.filter(pl.col("exit_time").dt.date() >= start_dt)
+        if end_dt:
+            filtered = filtered.filter(pl.col("exit_time").dt.date() <= end_dt)
+        return filtered
+
+    @staticmethod
+    def _build_histogram_buckets(values: np.ndarray, bins: int) -> list[HistogramBucket]:
+        zeros_mask = values == 0
+        zero_count = int(np.sum(zeros_mask))
+        nonzero_values = values[~zeros_mask]
+
+        def _format_range(start: float, end: float) -> str:
+            return f"${start:,.2f} to ${end:,.2f}"
+
+        if nonzero_values.size == 0:
+            if zero_count == 0:
+                return []
+            return [
+                HistogramBucket(
+                    bucket=_format_range(0.0, 0.0),
+                    count=zero_count,
+                    start_value=0.0,
+                    end_value=0.0,
+                )
+            ]
+
+        max_abs = float(np.max(np.abs(nonzero_values)))
+        if max_abs == 0:
+            max_abs = 1.0
+
+        neg_bins = bins // 2
+        pos_bins = bins - neg_bins
+        neg_edges = np.linspace(-max_abs, 0.0, neg_bins + 1) if neg_bins > 0 else np.array([0.0])
+        pos_edges = np.linspace(0.0, max_abs, pos_bins + 1) if pos_bins > 0 else np.array([0.0])
+
+        neg_hist, _ = np.histogram(nonzero_values, bins=neg_edges)
+        pos_hist, _ = np.histogram(nonzero_values, bins=pos_edges)
+
+        buckets: list[HistogramBucket] = []
+        if neg_bins > 0:
+            for count, start, end in zip(neg_hist, neg_edges[:-1], neg_edges[1:]):
+                label = _format_range(float(start), float(end))
+                buckets.append(
+                    HistogramBucket(
+                        bucket=label,
+                        count=int(count),
+                        start_value=float(start),
+                        end_value=float(end),
+                    )
+                )
+
+        if zero_count > 0:
+            buckets.append(
+                HistogramBucket(
+                    bucket=_format_range(0.0, 0.0),
+                    count=zero_count,
+                    start_value=0.0,
+                    end_value=0.0,
+                )
+            )
+
+        if pos_bins > 0:
+            for count, start, end in zip(pos_hist, pos_edges[:-1], pos_edges[1:]):
+                label = _format_range(float(start), float(end))
+                buckets.append(
+                    HistogramBucket(
+                        bucket=label,
+                        count=int(count),
+                        start_value=float(start),
+                        end_value=float(end),
+                    )
+                )
+        return buckets
 
 
     def cta(self, selection: Selection) -> CTAResponse:
