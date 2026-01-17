@@ -1522,13 +1522,6 @@ export default function HomePage() {
     if (walkForwardOutSampleMonths <= 0) {
       return { steps: [] as WalkForwardPlanStep[], error: 'Out-of-sample end must be after in-sample end.' };
     }
-    if (walkForwardDataEnd && compareMonthYear(walkForwardConfig.outSampleEnd, walkForwardDataEnd) > 0) {
-      return {
-        steps: [] as WalkForwardPlanStep[],
-        error: `Out-of-sample end exceeds available data (${formatMonthYear(walkForwardDataEnd)}).`,
-      };
-    }
-
     const steps: WalkForwardPlanStep[] = [];
     const maxMonth = walkForwardDataEnd ?? walkForwardConfig.outSampleEnd;
     let inSampleStart = walkForwardConfig.start;
@@ -1537,14 +1530,19 @@ export default function HomePage() {
     let outSampleEnd = addMonths(outSampleStart, walkForwardOutSampleMonths - 1);
 
     let guard = 0;
-    while (guard < 500 && compareMonthYear(outSampleEnd, maxMonth) <= 0) {
+    while (guard < 500 && compareMonthYear(outSampleStart, maxMonth) <= 0) {
+      const stepOutSampleEnd =
+        compareMonthYear(outSampleEnd, maxMonth) > 0 ? maxMonth : outSampleEnd;
       steps.push({
         index: steps.length + 1,
         inSampleStart,
         inSampleEnd,
         outSampleStart,
-        outSampleEnd,
+        outSampleEnd: stepOutSampleEnd,
       });
+      if (stepOutSampleEnd !== outSampleEnd) {
+        break;
+      }
       inSampleStart = addMonths(inSampleStart, walkForwardOutSampleMonths);
       inSampleEnd = addMonths(inSampleStart, walkForwardInSampleMonths - 1);
       outSampleStart = addMonths(inSampleEnd, 1);
