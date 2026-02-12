@@ -19,9 +19,10 @@ description: Make end-to-end changes across FastAPI backend and Next.js frontend
 2. Find frontend/client surface.
 3. Find state/store/data plumbing.
 4. Find charts/views consuming the data.
-5. Update shared types/contracts.
-6. Add or adjust tests (if coverage exists).
-7. Verify end-to-end.
+5. Check external Riskfolio source/docs when the change is Riskfolio-specific.
+6. Update shared types/contracts.
+7. Add or adjust tests (if coverage exists).
+8. Verify end-to-end.
 
 ## Step Details
 1. Find backend surface:
@@ -40,13 +41,16 @@ rg -n "Selection|selection_hash|get_selection|DataStore|PerFileCache|PortfolioAg
 ```sh
 rg -n "tabs|render[A-Za-z]+\\(|Chart|Grid|Heatmap" web/app/page.tsx web/components
 ```
-5. Update contracts in both layers:
+5. Check external Riskfolio source/docs (conditional):
+- If the workspace includes `../Riskfolio-Lib`, use it as the primary reference for Riskfolio-specific behavior before changing optimizer logic.
+- Limit this step to Riskfolio-related requests so non-optimizer work stays fast.
+6. Update contracts in both layers:
 - Backend: `api/api/app/schemas.py`, `api/api/app/dependencies.py`, affected route/service files.
 - Frontend: `web/lib/api.ts`, `web/lib/types/selection.ts`, `web/app/page.tsx` and affected components.
-6. Add/adjust tests:
+7. Add/adjust tests:
 - Existing test targets: `tests/test_ingest.py`, `tests/test_compute.py`.
 - Add focused tests only where current patterns already exist.
-7. Verify:
+8. Verify:
 ```sh
 python -m pytest tests/test_ingest.py tests/test_compute.py
 cd web
