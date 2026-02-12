@@ -40,3 +40,4 @@ data/
 *.parquet
 metadata/
 
+archive/
