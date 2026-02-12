@@ -29,6 +29,7 @@ MARGIN_SPEC: Dict[str, ContractSpec] = {
     "JY": ContractSpec(3200.0, 3200.0, 125000.0),
     "NE1": ContractSpec(1500.0, 1500.0, 100000.0),
     "NG": ContractSpec(3800.0, 3800.0, 10000.0),
+    "KW": ContractSpec(2200.0, 2200.0, 50.0),
     "SF": ContractSpec(4500.0, 4500.0, 125000.0),
 }
 
