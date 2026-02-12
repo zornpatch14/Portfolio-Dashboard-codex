@@ -1,14 +1,22 @@
-# Web Skeleton
+# Web App
 
-Next.js scaffold for the new front end. Agents should implement routing, selection state, API clients, and ECharts/AG Grid views per `REBUILD_PLAN.md`.
+Next.js frontend for the portfolio dashboard. Canonical repo-wide guidance now lives at `AGENTS.md`, and the code navigation map lives at `REPO_MAP.md`.
 
-## Dev
+## Run
 ```sh
 npm install
+# PowerShell:
+$env:NEXT_PUBLIC_API_BASE="http://localhost:8000"
 npm run dev
 ```
 
+## Verify
+```sh
+npx tsc --noEmit
+npm run build
+```
+
 ## Notes
-- Uses React Query for data fetching/caching (see plan).
-- Charts: ECharts; Tables: AG Grid.
-- Point API base to the FastAPI service via env (e.g., `NEXT_PUBLIC_API_BASE=http://localhost:8000`).
+- Data fetching/caching uses React Query.
+- Charts use ECharts; table views use AG Grid.
+- `npm run lint` currently prompts for ESLint setup interactively (no committed ESLint config yet).
